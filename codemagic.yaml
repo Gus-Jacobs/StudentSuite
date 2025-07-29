@@ -1,47 +1,34 @@
 # codemagic.yaml
 workflows:
-  ios-macos-build:
-    name: iOS & macOS Release Build
+  ios-development-build:
+    name: iOS Development Build
     instance_type: mac_mini_m1 # Use a Mac instance for Apple builds
 
-    # --- Environment Variables ---
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
-
-      # Environment variables for Firebase and Apple signing
-      # You MUST set these in Codemagic UI under Environment variables -> Secure files
-      # Example:
+      # Define your Firebase environment variables here if needed
+      # These should be set securely in Codemagic UI under Environment variables -> Secure files
       # FLUTTER_APP_FIREBASE_API_KEY:
       # FLUTTER_APP_FIREBASE_APP_ID:
       # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID:
       # FLUTTER_APP_FIREBASE_PROJECT_ID:
       # FLUTTER_APP_FIREBASE_STORAGE_BUCKET:
-      #
-      # For iOS Code Signing (set these securely in Codemagic UI)
-      # These are examples, you'll get actual values from Apple Developer Portal
-      # APPLE_ID: your-apple-id@example.com
-      # APP_STORE_CONNECT_PRIVATE_KEY: |
-      #   -----BEGIN PRIVATE KEY-----
-      #   YOUR_PRIVATE_KEY_HERE
-      #   -----END PRIVATE KEY-----
-      # APP_STORE_CONNECT_KEY_ID: YOUR_KEY_ID
-      # APP_STORE_CONNECT_ISSUER_ID: YOUR_ISSUER_ID
-      # IOS_BUNDLE_ID: com.yourcompany.studentsuite # Your iOS Bundle ID (must match pubspec.yaml and Xcode)
-      # APP_STORE_CONNECT_BUNDLE_ID: com.yourcompany.studentsuite # Same as IOS_BUNDLE_ID
-      # CERTIFICATE_PRIVATE_KEY: |
-      #   -----BEGIN RSA PRIVATE KEY-----
-      #   YOUR_P12_PRIVATE_KEY_HERE
-      #   -----END RSA PRIVATE KEY-----
 
+    # Use the specific App ID/Bundle ID for your app
+    # This value is used by Codemagic's automatic code signing
+    # You MUST set this as an Environment Variable in Codemagic UI (Variable group, Secure variable, or per-build)
+    # The value should be 'com.pegumax.studentsuite'
+    vars:
+      IOS_BUNDLE_ID: com.pegumax.studentsuite
 
-    # --- Triggering Syntax ---
     triggering:
+      # Trigger on pushes to a development branch (e.g., 'develop' or 'feature/*')
       branch_patterns:
-        - pattern: 'main' # Trigger on pushes to the 'main' branch
+        - pattern: 'develop'
           include: true
-        - pattern: 'feature/*' # Trigger on pushes to any branch named 'feature/anything'
+        - pattern: 'feature/*'
           include: true
 
     scripts:
@@ -53,31 +40,128 @@ workflows:
       - name: Get dependencies
         script: flutter pub get
 
-      # Build for iOS
-      - name: Build iOS App
+      # Install CocoaPods dependencies for iOS
+      - name: Install iOS Pods
         script: |
-          # flutter build ios --release --no-codesign # For unsigned testing builds
-          # For App Store Connect upload, you'd use Codemagic's built-in signing steps
-          flutter build ios --release --obfuscate --split-debug-info=./debug_info
+          cd ios
+          pod install
+          cd ..
 
-      # Build for macOS
-      - name: Build macOS App
+      # --- iOS Code Signing Configuration for Development ---
+      # This step is CRUCIAL for automatic code signing
+      - name: Set up iOS code signing
         script: |
-          flutter build macos --release --obfuscate --split-debug-info=./debug_info
+          xcode-project manage-profiles \
+            --action fetch \
+            --bundle-id "${IOS_BUNDLE_ID}" \
+            --development # Use --development for Development profiles
+          # If you want to build for Ad Hoc distribution for internal testing, you would use:
+          # --type iOS_APP_ADHOC
+          # And ensure your App Store Connect API Key in Codemagic has permissions to create Ad Hoc profiles.
 
-    # --- Artifacts Definition ---
+      - name: Build iOS App for Development
+        script: |
+          flutter build ios --debug --no-codesign # Codemagic's xcode_code_signing step handles signing
+          # Or, if you need a specific scheme/configuration for development:
+          # flutter build ios --flavor your_flavor --target lib/main_development.dart --debug --no-codesign
+
     artifacts:
-      - build/ios/Runner.ipa # The iOS App Store / TestFlight distributable
-      - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
+      - build/ios/Runner.ipa
 
-    # --- Publishing Section (FIXED) ---
     publishing:
       email:
         recipients:
-          - pegumaxinc@gmail.com # Replace with your actual email
-        notify: # <--- CRITICAL FIX: 'notify' key added here
-          success: true  # Boolean value
-          failure: true  # Boolean value
-        # Add other publishing options (like app_store_connect) here when ready
-        # app_store_connect:
-        #   # ... your App Store Connect config ...
+          - pegumaxinc@gmail.com
+        notify:
+          success: true
+          failure: true
+
+  ios-appstore-release-build:
+    name: iOS App Store Release Build
+    instance_type: mac_mini_m1
+
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      # Define your Firebase environment variables here if needed
+      # These should be set securely in Codemagic UI under Environment variables -> Secure files
+      # FLUTTER_APP_FIREBASE_API_KEY:
+      # FLUTTER_APP_FIREBASE_APP_ID:
+      # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID:
+      # FLUTTER_APP_FIREBASE_PROJECT_ID:
+      # FLUTTER_APP_FIREBASE_STORAGE_BUCKET:
+
+    # Use the specific App ID/Bundle ID for your app
+    # This value is used by Codemagic's automatic code signing
+    # You MUST set this as an Environment Variable in Codemagic UI (Variable group, Secure variable, or per-build)
+    # The value should be 'com.pegumax.studentsuite'
+    vars:
+      IOS_BUNDLE_ID: com.pegumax.studentsuite # Your iOS Bundle ID (must match pubspec.yaml and Xcode)
+
+    triggering:
+      branch_patterns:
+        - pattern: 'main' # Trigger only on pushes to the 'main' branch for releases
+          include: true
+
+    scripts:
+      - name: Set up Flutter
+        script: |
+          flutter channel $FLUTTER_CHANNEL
+          flutter upgrade
+          flutter doctor
+      - name: Get dependencies
+        script: flutter pub get
+
+      # Install CocoaPods dependencies for iOS
+      - name: Install iOS Pods
+        script: |
+          cd ios
+          pod install
+          cd ..
+
+      # --- iOS Code Signing Configuration for App Store Distribution ---
+      # This step is CRUCIAL for automatic code signing for App Store builds
+      - name: Set up iOS code signing for App Store
+        script: |
+          xcode-project manage-profiles \
+            --action fetch \
+            --bundle-id "${IOS_BUNDLE_ID}" \
+            --type IOS_APP_STORE # Use --type IOS_APP_STORE for App Store Distribution
+
+      - name: Build iOS App for App Store
+        script: |
+          flutter build ipa --release \
+            --obfuscate --split-debug-info=./debug_info \
+            --bundle-id "${IOS_BUNDLE_ID}" # Ensure bundle ID is explicitly set for ipa build
+          # --no-codesign is NOT used here as the xcode_code_signing step handles it
+
+    artifacts:
+      - build/ios/Runner.ipa # The iOS App Store / TestFlight distributable
+      # Removing macOS build artifacts from this iOS-specific workflow
+
+    publishing:
+      email:
+        recipients:
+          - pegumaxinc@gmail.com
+        notify:
+          success: true
+          failure: true
+
+      # --- Publish to App Store Connect ---
+      app_store_connect:
+        api_key: # Reference the App Store Connect API Key by its name in Codemagic UI
+          name: "My Apple API Key" # This should match the name you gave your API key in Codemagic Integrations
+        # If you need to submit to TestFlight first, use:
+        # submit_to_testflight: true
+        # build_number:
+        #   source: codemagic # or app_store, or xcode (depends on your versioning strategy)
+        # version_number:
+        #   source: project # or app_store
+        # For direct App Store submission (after successful TestFlight testing)
+        # submit_to_app_store: true
+        # release_type: manual # or automatic
+        # Changes the version number and build number from what's in pubspec.yaml and Info.plist
+        # Set to true if you want Codemagic to manage build numbers based on App Store Connect
+        # For simplicity, we'll let your project manage these initially.
+        # This will upload the .ipa to App Store Connect. You'll then manually push to TestFlight/App Store.
