@@ -71,14 +71,12 @@ workflows:
       - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
 
     # --- Publishing Section (FIXED) ---
-    # Add an email publishing step so the 'publishing' block is not empty/null.
-    # This just means you'll get email notifications about build status.
     publishing:
       email:
         recipients:
           - your-email@example.com # Replace with your actual email
-        success: true
-        failure: true
+        success: true  # <--- FIXED: Should be a boolean value
+        failure: true  # <--- FIXED: Should be a boolean value
         # Add other publishing options (like app_store_connect) here when ready
         # app_store_connect:
         #   # ... your App Store Connect config ...
