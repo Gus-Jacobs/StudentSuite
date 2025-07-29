@@ -1,118 +1,147 @@
 # codemagic.yaml
+#
+# This workflow is designed for building and publishing both iOS and macOS
+# release versions of your Flutter app to App Store Connect.
+# It leverages Codemagic's automatic code signing using an App Store Connect API Key.
+
 workflows:
   ios-macos-release-build:
-    - name: iOS & macOS Release Build
-    - instance_type: mac_mini_m1 # Use a Mac instance for Apple builds
+    name: iOS & macOS Release Build
+    instance_type: mac_mini_m1 # Use a Mac instance for Apple builds (required for iOS/macOS)
 
     # --- Environment Variables ---
+    # These variables configure the build environment.
+    # IMPORTANT: Ensure IOS_BUNDLE_ID is set in Codemagic UI Environment Variables.
     environment:
-      flutter: stable
-      xcode: latest
-      cocoapods: default
+      flutter: stable       # Specifies the Flutter channel to use
+      xcode: latest         # Uses the latest available Xcode version on Codemagic
+      cocoapods: default    # Uses the default CocoaPods version
 
-      # Environment variables for Firebase and Apple signing
-      # You MUST set these in Codemagic UI under Environment variables -> Secure files
-      # Example:
-      # FLUTTER_APP_FIREBASE_API_KEY:
-      # FLUTTER_APP_FIREBASE_APP_ID:
-      # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID:
-      # FLUTTER_APP_FIREBASE_PROJECT_ID:
-      # FLUTTER_APP_FIREBASE_STORAGE_BUCKET:
+      # Firebase Environment Variables (if your app uses Firebase)
+      # You MUST set these securely in Codemagic UI under Environment variables -> Secure files
+      # FLUTTER_APP_FIREBASE_API_KEY: your_api_key
+      # FLUTTER_APP_FIREBASE_APP_ID: your_app_id
+      # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID: your_Messaginger_id
+      # FLUTTER_APP_FIREBASE_PROJECT_ID: your_project_id
+      # FLUTTER_APP_FIREBASE_STORAGE_BUCKET: your_storage_bucket
 
-      # IMPORTANT: Your Bundle ID (com.pegumax.studentsuite)
-      # This MUST be set as an Environment Variable in Codemagic UI, e.g.,
-      # Variable Name: IOS_BUNDLE_ID
-      # Variable Value: com.pegumax.studentsuite
-      # Variable Group: (optional, but good practice for organization)
-      # Make sure the name 'IOS_BUNDLE_ID' matches what's used here.
+      # iOS Bundle ID: This variable is used for code signing and building.
+      # It MUST be set in Codemagic UI Environment Variables.
+      # Example: IOS_BUNDLE_ID: com.pegumax.studentsuite
 
-    # --- Integrations (for automatic code signing and publishing) ---
-    # This is where you tell Codemagic which App Store Connect API key to use
-    # for this workflow. It references the key you set up in the UI.
+    # --- Integrations ---
+    # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
+    # It tells Codemagic which key to use for fetching signing files and publishing.
     integrations:
-      app_store_connect: "Codemagic Integration Key" # <<-- Direct reference to your API key's name
+      app_store_connect: "Codemagic Integration Key" # Replace with the exact name of your API key in Codemagic Integrations
 
-    # --- Triggering Syntax ---
+    # --- Triggering ---
+    # Defines when this workflow should be triggered.
     triggering:
       branch_patterns:
-        - pattern: 'main' # Trigger on pushes to the 'main' branch for releases
+        - pattern: 'main' # Trigger this release build workflow on pushes to the 'main' branch
           include: true
+        # You can add other branches like 'release/*' if your workflow dictates it.
 
+    # --- Build Steps (Scripts) ---
+    # The sequence of commands to execute during the build.
     scripts:
       - name: Set up Flutter
         script: |
+          # Set the Flutter channel, upgrade, and run doctor for diagnostics
           flutter channel $FLUTTER_CHANNEL
           flutter upgrade
           flutter doctor
-      - name: Get dependencies
-        script: flutter pub get
 
-      # Install CocoaPods dependencies for iOS
+      - name: Get dependencies
+        script: |
+          # Fetch Flutter package dependencies
+          flutter pub get
+
       - name: Install iOS Pods
         script: |
+          # Navigate to the iOS project directory and install CocoaPods dependencies
           cd ios
           pod install
-          cd ..
+          cd .. # Navigate back to the root of the Flutter project
 
-      # --- Code Signing Configuration for iOS and macOS ---
-      # Using the updated 'app-store-connect fetch-signing-files' command
-     - name: Fetch iOS and macOS signing files
+      - name: Fetch iOS and macOS signing files
         script: |
-          # Debugging step: Print the variable to see its value
-          echo "IOS_BUNDLE_ID from environment: ${IOS_BUNDLE_ID}"
-
-          # Fetch iOS App Store Distribution files
+          # Debugging: Print the bundle ID to confirm it's available
+          echo "Using Bundle ID for signing: ${IOS_BUNDLE_ID}"
+          
+          # Fetch iOS App Store Distribution files (certificate and provisioning profile)
+          # --type IOS_APP_STORE: Specifies that it's for App Store distribution
+          # --create: Tells Codemagic to create the necessary files in Apple Developer Portal if they don't exist
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
             --create
           
-          # Fetch macOS App Store Distribution files
+          # Fetch macOS App Store Distribution files (certificate and provisioning profile)
+          # --platform MAC_OS: Essential to specify macOS for macOS signing files
+          # --type MAC_APP_STORE: Specifies that it's for Mac App Store distribution
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --platform MAC_OS \
             --type MAC_APP_STORE \
             --create
 
-      # Build for iOS
-      - name: Build iOS App
+      - name: Build iOS App (IPA)
         script: |
-          # The signing is handled by the `fetch-signing-files` step,
-          # and Flutter build ipa integrates with Xcode's standard signing.
+          # Build the iOS application package (IPA) for release.
+          # --release: Builds a release version.
+          # --obfuscate, --split-debug-info: For code obfuscation and debug info separation (improves security/reduces size).
+          # --bundle-id: Explicitly sets the bundle ID for the build (good practice for `ipa` builds).
           flutter build ipa --release \
             --obfuscate --split-debug-info=./debug_info \
             --bundle-id "${IOS_BUNDLE_ID}"
 
-      # Build for macOS
       - name: Build macOS App
         script: |
+          # Build the macOS application bundle for release.
+          # --release: Builds a release version.
+          # --obfuscate, --split-debug-info: For code obfuscation and debug info separation.
+          # --target-platform macos-x64: Targets Intel macOS. Remove if you want a universal binary by default on M1/M2.
           flutter build macos --release \
             --obfuscate --split-debug-info=./debug_info \
-            --target-platform macos-x64 # Specify platform if needed
+            --target-platform macos-x64
 
-    # --- Artifacts Definition ---
+    # --- Artifacts ---
+    # Specifies which files to save as build artifacts after the workflow completes.
     artifacts:
-      - build/ios/Runner.ipa # The iOS App Store / TestFlight distributable
+      - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
       - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
 
-    # --- Publishing Section ---
+    # --- Publishing ---
+    # Configures post-build actions, such as email notifications and App Store Connect uploads.
     publishing:
       email:
         recipients:
-          - pegumaxinc@gmail.com
+          - pegumaxinc@gmail.com # Replace with your actual email address
         notify:
-          success: true
-          failure: true
+          success: true # Notify on successful builds
+          failure: true # Notify on failed builds
 
-      # --- Publish to App Store Connect (for iOS) ---
+      # --- App Store Connect Publishing (for iOS) ---
+      # This block uploads the generated iOS IPA to App Store Connect.
       app_store_connect:
-        auth: integration # This tells Codemagic to use the App Store Connect API key integration
-        # submit_to_testflight: true # Uncomment to submit to TestFlight automatically
+        auth: integration # Instructs Codemagic to use the App Store Connect API Key linked via 'integrations'
+        # To automatically submit to TestFlight after upload, uncomment the line below:
+        # submit_to_testflight: true
+        # To manage build numbers:
         # build_number:
-        #   source: codemagic
+        #   source: codemagic # Codemagic assigns a unique build number
         # version_number:
-        #   source: project
-        # submit_to_app_store: true # Only enable after TestFlight testing is complete
-        # release_type: manual # or automatic
-        # NOTE: This 'app_store_connect' block is primarily for iOS IPA uploads.
-        # For macOS app uploads to the Mac App Store, it's a more involved process often
-        # requiring specific notarization steps and potentially a separate publishing tool or script.
-        # It's highly recommended to get iOS publishing working first.
+        #   source: project # Uses version from pubspec.yaml and Info.plist
+        # To automatically submit to the App Store (after TestFlight testing):
+        # submit_to_app_store: true
+        # release_type: manual # or automatic (manual is safer initially)
+
+      # --- macOS App Store Connect Publishing (Advanced - Placeholder) ---
+      # Note: Publishing macOS apps to the Mac App Store is more involved than iOS.
+      # It often requires additional steps like notarization using `notarytool`
+      # and specific `altool` or `app_store_connect` commands for macOS.
+      # The standard `app_store_connect` block primarily handles iOS IPAs.
+      # If you need full macOS App Store automation, you might need dedicated
+      # scripts or a separate publishing configuration specific to macOS artifacts.
+      # For now, this YAML will build the macOS app and save it as an artifact.
+      # You would then manually upload and notarize it via App Store Connect or Xcode.
