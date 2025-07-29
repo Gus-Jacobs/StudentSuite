@@ -74,7 +74,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your-email@example.com # Replace with your actual email
+          - pegumaxinc@gmail.com # Replace with your actual email
         notify: # <--- CRITICAL FIX: 'notify' key added here
           success: true  # Boolean value
           failure: true  # Boolean value
