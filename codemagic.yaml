@@ -56,20 +56,21 @@ workflows:
 
       # --- Code Signing Configuration for iOS and macOS ---
       # Using the updated 'app-store-connect fetch-signing-files' command
-      - name: Fetch iOS and macOS signing files
+     name: Fetch iOS and macOS signing files
         script: |
+          # Debugging step: Print the variable to see its value
+          echo "IOS_BUNDLE_ID from environment: ${IOS_BUNDLE_ID}"
+
           # Fetch iOS App Store Distribution files
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
-            --create # This flag will create profiles/certificates if they don't exist
+            --create
           
           # Fetch macOS App Store Distribution files
-          # Note: macOS distribution needs a MAC_APP_STORE provisioning profile type
-          # and a "Mac App Distribution" certificate.
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --platform MAC_OS \
             --type MAC_APP_STORE \
-            --create # This flag will create profiles/certificates if they don't exist
+            --create
 
       # Build for iOS
       - name: Build iOS App
