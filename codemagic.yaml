@@ -151,7 +151,7 @@ workflows:
       # --- Publish to App Store Connect ---
       app_store_connect:
         api_key: # Reference the App Store Connect API Key by its name in Codemagic UI
-          name: "My Apple API Key" # This should match the name you gave your API key in Codemagic Integrations
+          name: "Codemagic Integration Key" # This should match the name you gave your API key in Codemagic Integrations
         # If you need to submit to TestFlight first, use:
         # submit_to_testflight: true
         # build_number:
