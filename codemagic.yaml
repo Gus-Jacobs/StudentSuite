@@ -2,7 +2,7 @@
 workflows:
   ios-macos-release-build:
     - name: iOS & macOS Release Build
-    instance_type: mac_mini_m1 # Use a Mac instance for Apple builds
+    - instance_type: mac_mini_m1 # Use a Mac instance for Apple builds
 
     # --- Environment Variables ---
     environment:
