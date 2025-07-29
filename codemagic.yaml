@@ -1,0 +1,70 @@
+# .codemagic.yaml
+workflows:
+  ios-macos-build:
+    name: iOS & macOS Release Build
+    instance_type: mac_mini_m1 # Use a Mac instance for Apple builds
+    # Environment variables (you'll add these securely in Codemagic UI for Apple signing)
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default # Codemagic will handle these
+
+      # For iOS Code Signing (set these in Codemagic UI under Environment variables -> Secure files)
+      # APPLE_ID: # Your Apple ID
+      # APP_STORE_CONNECT_PRIVATE_KEY: # From App Store Connect API Key
+      # APP_STORE_CONNECT_KEY_ID: # Key ID
+      # APP_STORE_CONNECT_ISSUER_ID: # Issuer ID
+      # IOS_BUNDLE_ID: com.yourcompany.studentsuite # Your iOS Bundle ID
+      # APP_STORE_CONNECT_BUNDLE_ID: com.yourcompany.studentsuite # Same as IOS_BUNDLE_ID
+      # CERTIFICATE_PRIVATE_KEY: # Your P12 certificate private key for iOS/macOS signing
+
+    triggering:
+      # Build on every push to the main branch
+      branch_patterns:
+        - feature/* # Or your main development branch like `main` or `master`
+        - main
+
+    scripts:
+      - name: Set up Flutter
+        script: |
+          flutter channel $FLUTTER_CHANNEL # e.g., stable
+          flutter upgrade
+          flutter doctor
+      - name: Get dependencies
+        script: flutter pub get
+
+      # Build for iOS
+      - name: Build iOS App
+        script: |
+          # Replace with your actual iOS Bundle ID in pubspec.yaml and Xcode
+          # flutter build ios --release --no-codesign # Use --no-codesign for unsigned testing builds
+          # For App Store Connect upload, you'd use Codemagic's built-in signing steps
+          # or a more complex build command provided by Codemagic documentation.
+          flutter build ios --release --obfuscate --split-debug-info=./debug_info
+
+      # Build for macOS
+      - name: Build macOS App
+        script: |
+          flutter build macos --release --obfuscate --split-debug-info=./debug_info
+
+    artifacts:
+      - build/ios/Runner.ipa # For iOS App Store distribution
+      - build/macos/Build/Products/Release/*.app.zip # For macOS direct download
+
+    publishing:
+      # Example: Publish to App Store Connect (requires configuration in Codemagic UI)
+      # app_store_connect:
+      #   api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+      #   issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+      #   key_id: $APP_STORE_CONNECT_KEY_ID
+      #   bundle_id: $APP_STORE_CONNECT_BUNDLE_ID
+      #   version: $(FLUTTER_BUILD_NUMBER)
+      #   build_number: $(FLUTTER_BUILD_NUMBER)
+      #   submit_for_review: false # Set to true to automatically submit
+      #   automatic_release: false # Set to true to automatically release
+
+      # Example: Publish artifacts to Codemagic (for direct download links)
+      # You can find the direct download links for artifacts in the build results
+      # on Codemagic. These links are what you'd put on your Django launch page.
+      artifacts:
+        enabled: true
