@@ -37,10 +37,6 @@ workflows:
       branch_patterns:
         - pattern: 'main' # Trigger on pushes to the 'main' branch for releases
           include: true
-        # You can add a 'develop' or 'feature/*' branch here if you want test builds
-        # to also run iOS and macOS together for development.
-        # - pattern: 'develop'
-        #   include: true
 
     scripts:
       - name: Set up Flutter
@@ -58,28 +54,28 @@ workflows:
           pod install
           cd ..
 
-      # --- iOS Code Signing Configuration ---
-      # This step handles certificates and provisioning profiles for iOS App Store distribution
-      # The '--api-key-name' flag is no longer needed here when using the 'integrations' block above.
-      - name: Set up iOS code signing for App Store
+      # --- Code Signing Configuration for iOS and macOS ---
+      # Using the updated 'app-store-connect fetch-signing-files' command
+      - name: Fetch iOS and macOS signing files
         script: |
-          xcode-project manage-profiles \
-            --action fetch \
-            --bundle-id "${IOS_BUNDLE_ID}" \
-            --type IOS_APP_STORE
-
-      # --- macOS Code Signing Configuration ---
-      # This step handles certificates and provisioning profiles for macOS App Store distribution
-      - name: Set up macOS code signing for App Store
-        script: |
-          xcode-project manage-profiles \
-            --action fetch \
-            --bundle-id "${IOS_BUNDLE_ID}" \
-            --type MAC_APP_STORE
+          # Fetch iOS App Store Distribution files
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+            --type IOS_APP_STORE \
+            --create # This flag will create profiles/certificates if they don't exist
+          
+          # Fetch macOS App Store Distribution files
+          # Note: macOS distribution needs a MAC_APP_STORE provisioning profile type
+          # and a "Mac App Distribution" certificate.
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+            --platform MAC_OS \
+            --type MAC_APP_STORE \
+            --create # This flag will create profiles/certificates if they don't exist
 
       # Build for iOS
       - name: Build iOS App
         script: |
+          # The signing is handled by the `fetch-signing-files` step,
+          # and Flutter build ipa integrates with Xcode's standard signing.
           flutter build ipa --release \
             --obfuscate --split-debug-info=./debug_info \
             --bundle-id "${IOS_BUNDLE_ID}"
@@ -105,9 +101,9 @@ workflows:
           success: true
           failure: true
 
-      # --- Publish to App Store Connect (for iOS and potentially macOS) ---
+      # --- Publish to App Store Connect (for iOS) ---
       app_store_connect:
-        auth: integration # <<-- THIS IS THE CRITICAL FIX for the second error
+        auth: integration # This tells Codemagic to use the App Store Connect API key integration
         # submit_to_testflight: true # Uncomment to submit to TestFlight automatically
         # build_number:
         #   source: codemagic
@@ -115,8 +111,7 @@ workflows:
         #   source: project
         # submit_to_app_store: true # Only enable after TestFlight testing is complete
         # release_type: manual # or automatic
-        # NOTE: For macOS, while this block can upload the .ipa for iOS,
-        # uploading macOS apps to the Mac App Store is handled differently and
-        # often requires specific notarization steps which might not be covered
-        # by this standard 'app_store_connect' block alone. You may need custom
-        # scripts for full macOS automation.
+        # NOTE: This 'app_store_connect' block is primarily for iOS IPA uploads.
+        # For macOS app uploads to the Mac App Store, it's a more involved process often
+        # requiring specific notarization steps and potentially a separate publishing tool or script.
+        # It's highly recommended to get iOS publishing working first.
