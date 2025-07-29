@@ -56,7 +56,7 @@ workflows:
 
       # --- Code Signing Configuration for iOS and macOS ---
       # Using the updated 'app-store-connect fetch-signing-files' command
-     name: Fetch iOS and macOS signing files
+     - name: Fetch iOS and macOS signing files
         script: |
           # Debugging step: Print the variable to see its value
           echo "IOS_BUNDLE_ID from environment: ${IOS_BUNDLE_ID}"
