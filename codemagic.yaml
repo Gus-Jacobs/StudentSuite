@@ -4,7 +4,7 @@ workflows:
     name: iOS & macOS Release Build
     instance_type: mac_mini_m1 # Use a Mac instance for Apple builds
 
-    # --- Corrected Environment Variables ---
+    # --- Environment Variables ---
     environment:
       flutter: stable
       xcode: latest
@@ -20,23 +20,29 @@ workflows:
       # FLUTTER_APP_FIREBASE_STORAGE_BUCKET:
       #
       # For iOS Code Signing (set these securely in Codemagic UI)
-      # APPLE_ID: # Your Apple ID email
-      # APP_STORE_CONNECT_PRIVATE_KEY: # Private key from App Store Connect API Key
-      # APP_STORE_CONNECT_KEY_ID: # Key ID from App Store Connect API Key
-      # APP_STORE_CONNECT_ISSUER_ID: # Issuer ID from App Store Connect API Key
+      # These are examples, you'll get actual values from Apple Developer Portal
+      # APPLE_ID: your-apple-id@example.com
+      # APP_STORE_CONNECT_PRIVATE_KEY: |
+      #   -----BEGIN PRIVATE KEY-----
+      #   YOUR_PRIVATE_KEY_HERE
+      #   -----END PRIVATE KEY-----
+      # APP_STORE_CONNECT_KEY_ID: YOUR_KEY_ID
+      # APP_STORE_CONNECT_ISSUER_ID: YOUR_ISSUER_ID
       # IOS_BUNDLE_ID: com.yourcompany.studentsuite # Your iOS Bundle ID (must match pubspec.yaml and Xcode)
       # APP_STORE_CONNECT_BUNDLE_ID: com.yourcompany.studentsuite # Same as IOS_BUNDLE_ID
-      # CERTIFICATE_PRIVATE_KEY: # Content of your P12 certificate private key for iOS/macOS signing
+      # CERTIFICATE_PRIVATE_KEY: |
+      #   -----BEGIN RSA PRIVATE KEY-----
+      #   YOUR_P12_PRIVATE_KEY_HERE
+      #   -----END RSA PRIVATE KEY-----
 
-    # --- Corrected Triggering Syntax ---
+
+    # --- Triggering Syntax ---
     triggering:
-      # Build on every push to specified branches
       branch_patterns:
         - pattern: 'main' # Trigger on pushes to the 'main' branch
           include: true
         - pattern: 'feature/*' # Trigger on pushes to any branch named 'feature/anything'
           include: true
-      # You can also add more triggering options like tag_patterns, cron, etc.
 
     scripts:
       - name: Set up Flutter
@@ -50,8 +56,8 @@ workflows:
       # Build for iOS
       - name: Build iOS App
         script: |
-          # Use --release for optimized build. --no-codesign is for unsigned builds.
-          # For App Store Connect upload, you'd integrate Codemagic's automatic signing steps.
+          # flutter build ios --release --no-codesign # For unsigned testing builds
+          # For App Store Connect upload, you'd use Codemagic's built-in signing steps
           flutter build ios --release --obfuscate --split-debug-info=./debug_info
 
       # Build for macOS
@@ -59,34 +65,20 @@ workflows:
         script: |
           flutter build macos --release --obfuscate --split-debug-info=./debug_info
 
-    # --- Corrected Artifacts Definition (at workflow level) ---
+    # --- Artifacts Definition ---
     artifacts:
       - build/ios/Runner.ipa # The iOS App Store / TestFlight distributable
       - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
 
-    # --- Publishing Section (optional, for direct upload to stores) ---
-    # This section is for where to push your generated artifacts.
-    # It does NOT define which artifacts to collect.
+    # --- Publishing Section (FIXED) ---
+    # Add an email publishing step so the 'publishing' block is not empty/null.
+    # This just means you'll get email notifications about build status.
     publishing:
-      # Example: Publish to App Store Connect (requires configuration in Codemagic UI)
-      # Only enable this AFTER you have set up Apple Developer Account and App Store Connect API Key in Codemagic
-      # app_store_connect:
-      #   api_key: $APP_STORE_CONNECT_PRIVATE_KEY
-      #   issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-      #   key_id: $APP_STORE_CONNECT_KEY_ID
-      #   bundle_id: $APP_STORE_CONNECT_BUNDLE_ID # Must match your app's bundle ID
-      #   version: $(FLUTTER_BUILD_NUMBER) # Uses the build number from Flutter
-      #   build_number: $(FLUTTER_BUILD_NUMBER)
-      #   submit_for_review: false # Set to true to automatically submit for review
-      #   automatic_release: false # Set to true to automatically release after approval
-
-      # Example: Publish to Codemagic Artifacts (for download links)
-      # This is usually enabled by default if you don't configure other publishing targets.
-      # You can usually just leave this empty, and Codemagic will automatically save your
-      # defined artifacts (from the 'artifacts' section above) and provide download links.
-      # To explicitly enable/disable:
-      # email:
-      #   recipients:
-      #     - example@email.com
-      #   success: true
-      #   failure: true
+      email:
+        recipients:
+          - your-email@example.com # Replace with your actual email
+        success: true
+        failure: true
+        # Add other publishing options (like app_store_connect) here when ready
+        # app_store_connect:
+        #   # ... your App Store Connect config ...
