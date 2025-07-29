@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Minimalist Cover Letter</title>
+  <style>
+    body { font-family: 'Inter', Arial, sans-serif; background: #f4f4f4; color: #222; margin: 0; }
+    .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 12px #e5e7eb; padding: 32px; }
+    .header { margin-bottom: 2em; color: #888; }
+    .signature { margin-top: 2em; color: #888; }
+    .salutation { font-weight: 500; }
+    .body { margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>{{user_name}}</div>
+      <div>{{user_email}} &bull; {{user_phone}}</div>
+      <div>{{date}}</div>
+    </div>
+    <div>
+      <div>{{company_name}}</div>
+      <div>{{company_address}}</div>
+    </div>
+    <div class="salutation">{{salutation}}</div>
+    <div class="body">
+      <p>{{opening_paragraph}}</p>
+      <p>{{body_paragraphs}}</p>
+      <p>{{closing_paragraph}}</p>
+    </div>
+    <div class="signature">
+      <p>{{closing}}</p>
+      <p>{{user_name}}</p>
+    </div>
+  </div>
+</body>
+</html>

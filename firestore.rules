@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Globals Rules ---
+    // Only backend functions can read/write global metadata like user counts.
+    // This prevents clients from tampering with the founder count.
+    match /globals/{docId} {
+      allow read, write: if false;
+    }
+
+    // --- User Profile Rules ---
+    // Rules for a user's own document in the 'users' collection.
+    match /users/{userId} {
+      // A user can create their own document upon signup.
+      allow create: if request.auth.uid == userId;
+
+      // A user can read their own document.
+      // This is crucial for the app to listen for subscription status changes.
+      allow read: if request.auth.uid == userId;
+
+      // A user can update their own document, BUT we prevent them from
+      // giving themselves a 'pro' role or changing their Stripe ID.
+      // The isFounder flag is also protected and set only by the backend.
+      allow update: if request.auth.uid == userId &&
+                    !(request.resource.data.diff(resource.data).affectedKeys()
+                      .hasAny(['stripeRole', 'stripeCustomerId', 'isFounder']));
+    }
+
+    // --- Stripe Checkout Rules ---
+    // Rules for the 'checkout_sessions' subcollection within a user's document.
+    match /users/{userId}/checkout_sessions/{sessionId} {
+
+      // A user can create a document here to trigger a checkout.
+      // They can also read and update it to get the Stripe URL back from the function.
+      allow create, read, update: if request.auth.uid == userId;
+    }
+
+    // --- Stripe Customer Portal Rules ---
+    // Rules for the 'portal_links' subcollection within a user's document.
+    match /users/{userId}/portal_links/{linkId} {
+
+      // A user can create a document here to get a link to manage their subscription.
+      allow create, read: if request.auth.uid == userId;
+    }
+
+    // --- AI Usage Rules ---
+    // Rules for the 'aiUsage' subcollection to track monthly costs.
+    match /users/{userId}/aiUsage/{monthYear} {
+      // Only allow the user to read their own usage data.
+      // All writes must be performed by a trusted backend (Cloud Function).
+      allow read: if request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // --- Feedback Rules ---
+    match /feedback/{feedbackId} {
+      // Only authenticated users can create feedback to prevent spam.
+      allow create: if request.auth != null;
+    }
+  }
+}

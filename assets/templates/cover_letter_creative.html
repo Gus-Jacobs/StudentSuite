@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Creative Cover Letter</title>
+  <style>
+    body { font-family: 'Montserrat', Arial, sans-serif; margin: 0; background: linear-gradient(135deg, #f8fafc 60%, #e0e7ff 100%); color: #222; }
+    .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px #dbeafe; padding: 40px; }
+    .header { margin-bottom: 2em; color: #6366f1; }
+    .signature { margin-top: 2em; color: #6366f1; }
+    .salutation { font-weight: bold; color: #6366f1; }
+    .body { margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>{{user_name}} &bull; {{user_email}} &bull; {{user_phone}}</div>
+      <div>{{date}}</div>
+    </div>
+    <div>
+      <div>{{company_name}}</div>
+      <div>{{company_address}}</div>
+    </div>
+    <div class="salutation">{{salutation}}</div>
+    <div class="body">
+      <p>{{opening_paragraph}}</p>
+      <p>{{body_paragraphs}}</p>
+      <p>{{closing_paragraph}}</p>
+    </div>
+    <div class="signature">
+      <p>{{closing}}</p>
+      <p>{{user_name}}</p>
+    </div>
+  </div>
+</body>
+</html>

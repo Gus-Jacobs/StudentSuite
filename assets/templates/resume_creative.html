@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Creative Resume</title>
+  <style>
+    body { font-family: 'Montserrat', Arial, sans-serif; margin: 0; background: linear-gradient(135deg, #f8fafc 60%, #e0e7ff 100%); color: #222; }
+    .container { max-width: 800px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px #dbeafe; padding: 40px; }
+    h1 { font-size: 2.5em; color: #6366f1; margin-bottom: 0; }
+    h2 { font-size: 1.2em; margin-top: 2em; color: #6366f1; letter-spacing: 1px; }
+    .contact { font-size: 1em; margin-bottom: 1em; color: #64748b; }
+    .section { margin-bottom: 2em; }
+    ul { margin: 0.5em 0 0 1.5em; }
+    .skills { margin-top: 0.5em; }
+    .edu, .exp { margin-bottom: 1em; }
+    .exp-title { font-weight: bold; color: #6366f1; }
+    .exp-company { font-style: italic; color: #64748b; }
+    .exp-dates { float: right; color: #94a3b8; }
+    .badge { display: inline-block; background: #6366f1; color: #fff; border-radius: 8px; padding: 2px 10px; font-size: 0.9em; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{{name}}</h1>
+    <div class="contact">
+      <span class="badge">Email</span> {{email}}
+      <span class="badge">Phone</span> {{phone}}
+    </div>
+    <div class="section">
+      <h2>Summary</h2>
+      <p>{{summary}}</p>
+    </div>
+    <div class="section">
+      <h2>Experience</h2>
+      {{#experiences}}
+      <div class="exp">
+        <span class="exp-title">{{title}}</span>,
+        <span class="exp-company">{{company}}</span>
+        <span class="exp-dates">{{dates}}</span>
+        <ul>
+          {{#bullet_points}}
+          <li>{{.}}</li>
+          {{/bullet_points}}
+        </ul>
+      </div>
+      {{/experiences}}
+    </div>
+    <div class="section">
+      <h2>Education</h2>
+      {{#education}}
+      <div class="edu">
+        <strong>{{degree}}</strong>, {{school}} ({{grad_date}})
+      </div>
+      {{/education}}
+    </div>
+    <div class="section">
+      <h2>Skills</h2>
+      <div class="skills">
+        <span class="badge">Hard Skills</span> {{hard_skills}}<br>
+        <span class="badge">Soft Skills</span> {{soft_skills}}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

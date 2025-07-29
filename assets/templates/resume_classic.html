@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Classic Resume</title>
+  <style>
+    body { font-family: 'Times New Roman', Times, serif; margin: 40px; color: #222; }
+    h1 { font-size: 2em; margin-bottom: 0; }
+    h2 { font-size: 1.2em; margin-top: 2em; border-bottom: 1px solid #bbb; }
+    .section { margin-bottom: 1.5em; }
+    .contact { font-size: 1em; margin-bottom: 1em; }
+    ul { margin: 0.5em 0 0 1.5em; }
+    .skills { margin-top: 0.5em; }
+    .edu, .exp { margin-bottom: 1em; }
+    .exp-title { font-weight: bold; }
+    .exp-company { font-style: italic; }
+    .exp-dates { float: right; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>{{name}}</h1>
+  <div class="contact">
+    Email: {{email}} | Phone: {{phone}}
+  </div>
+  <div class="section">
+    <h2>Professional Summary</h2>
+    <p>{{summary}}</p>
+  </div>
+  <div class="section">
+    <h2>Experience</h2>
+    {{#experiences}}
+    <div class="exp">
+      <span class="exp-title">{{title}}</span>,
+      <span class="exp-company">{{company}}</span>
+      <span class="exp-dates">{{dates}}</span>
+      <ul>
+        {{#bullet_points}}
+        <li>{{.}}</li>
+        {{/bullet_points}}
+      </ul>
+    </div>
+    {{/experiences}}
+  </div>
+  <div class="section">
+    <h2>Education</h2>
+    {{#education}}
+    <div class="edu">
+      <strong>{{degree}}</strong>, {{school}} ({{grad_date}})
+    </div>
+    {{/education}}
+  </div>
+  <div class="section">
+    <h2>Skills</h2>
+    <div class="skills">
+      <strong>Hard Skills:</strong> {{hard_skills}}<br>
+      <strong>Soft Skills:</strong> {{soft_skills}}
+    </div>
+  </div>
+</body>
+</html>

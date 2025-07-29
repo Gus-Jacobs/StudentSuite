@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Minimalist Resume</title>
+  <style>
+    body { font-family: 'Inter', Arial, sans-serif; background: #f4f4f4; color: #222; margin: 0; }
+    .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 12px #e5e7eb; padding: 32px; }
+    h1 { font-size: 2em; margin-bottom: 0.5em; }
+    h2 { font-size: 1em; margin-top: 2em; color: #555; letter-spacing: 1px; }
+    .contact { font-size: 0.95em; margin-bottom: 1em; color: #888; }
+    .section { margin-bottom: 1.5em; }
+    ul { margin: 0.5em 0 0 1.5em; }
+    .edu, .exp { margin-bottom: 1em; }
+    .exp-title { font-weight: 500; }
+    .exp-company { font-style: italic; color: #666; }
+    .exp-dates { float: right; color: #bbb; }
+    .skills { margin-top: 0.5em; font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{{name}}</h1>
+    <div class="contact">
+      {{email}} &bull; {{phone}}
+    </div>
+    <div class="section">
+      <h2>Summary</h2>
+      <p>{{summary}}</p>
+    </div>
+    <div class="section">
+      <h2>Experience</h2>
+      {{#experiences}}
+      <div class="exp">
+        <span class="exp-title">{{title}}</span>,
+        <span class="exp-company">{{company}}</span>
+        <span class="exp-dates">{{dates}}</span>
+        <ul>
+          {{#bullet_points}}
+          <li>{{.}}</li>
+          {{/bullet_points}}
+        </ul>
+      </div>
+      {{/experiences}}
+    </div>
+    <div class="section">
+      <h2>Education</h2>
+      {{#education}}
+      <div class="edu">
+        <strong>{{degree}}</strong>, {{school}} ({{grad_date}})
+      </div>
+      {{/education}}
+    </div>
+    <div class="section">
+      <h2>Skills</h2>
+      <div class="skills">
+        <strong>Hard:</strong> {{hard_skills}}<br>
+        <strong>Soft:</strong> {{soft_skills}}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

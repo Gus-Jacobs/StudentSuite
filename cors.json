@@ -1,0 +1,21 @@
+[
+  {
+    "origin": [
+      "http://localhost:*",
+      "https://student-suite-9ae1d.web.app",
+      "https://student-suite-9ae1d.firebaseapp.com",
+      "https://app.studentsuite.com",
+      "https://pegumax.com",
+      "https://www.pegumax.com"
+    ],
+    "method": [
+      "GET",
+      "POST",
+      "PUT"
+    ],
+    "responseHeader": [
+      "Content-Type"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
