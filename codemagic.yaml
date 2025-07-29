@@ -20,16 +20,17 @@ workflows:
       # FLUTTER_APP_FIREBASE_STORAGE_BUCKET:
 
       # IMPORTANT: Your Bundle ID (com.pegumax.studentsuite)
-      # This should be set as an Environment Variable in Codemagic UI, e.g.,
+      # This MUST be set as an Environment Variable in Codemagic UI, e.g.,
       # Variable Name: IOS_BUNDLE_ID
       # Variable Value: com.pegumax.studentsuite
       # Variable Group: (optional, but good practice for organization)
       # Make sure the name 'IOS_BUNDLE_ID' matches what's used here.
 
-      # Reference your App Store Connect API Key by its name as defined in Codemagic Integrations
-      # The name you provided was "Codemagic Integration Key"
-      APP_STORE_CONNECT_KEY_NAME: "Codemagic Integration Key"
-
+    # --- Integrations (for automatic code signing and publishing) ---
+    # This is where you tell Codemagic which App Store Connect API key to use
+    # for this workflow. It references the key you set up in the UI.
+    integrations:
+      app_store_connect: "Codemagic Integration Key" # <<-- Direct reference to your API key's name
 
     # --- Triggering Syntax ---
     triggering:
@@ -59,32 +60,29 @@ workflows:
 
       # --- iOS Code Signing Configuration ---
       # This step handles certificates and provisioning profiles for iOS App Store distribution
+      # The '--api-key-name' flag is no longer needed here when using the 'integrations' block above.
       - name: Set up iOS code signing for App Store
         script: |
           xcode-project manage-profiles \
             --action fetch \
             --bundle-id "${IOS_BUNDLE_ID}" \
-            --type IOS_APP_STORE \
-            --api-key-name "${APP_STORE_CONNECT_KEY_NAME}" # Reference the API key name here
+            --type IOS_APP_STORE
 
       # --- macOS Code Signing Configuration ---
       # This step handles certificates and provisioning profiles for macOS App Store distribution
-      # Note: macOS App Store Connect publishing is separate from iOS.
-      # For macOS, you usually need a "Mac App Distribution" certificate and a "Mac App Store" provisioning profile.
       - name: Set up macOS code signing for App Store
         script: |
           xcode-project manage-profiles \
             --action fetch \
             --bundle-id "${IOS_BUNDLE_ID}" \
-            --type MAC_APP_STORE \
-            --api-key-name "${APP_STORE_CONNECT_KEY_NAME}" # Reference the API key name here
+            --type MAC_APP_STORE
 
       # Build for iOS
       - name: Build iOS App
         script: |
           flutter build ipa --release \
             --obfuscate --split-debug-info=./debug_info \
-            --bundle-id "${IOS_BUNDLE_ID}" # Ensure bundle ID is explicitly set for ipa build
+            --bundle-id "${IOS_BUNDLE_ID}"
 
       # Build for macOS
       - name: Build macOS App
@@ -92,11 +90,6 @@ workflows:
           flutter build macos --release \
             --obfuscate --split-debug-info=./debug_info \
             --target-platform macos-x64 # Specify platform if needed
-          # Ensure your macOS project in Xcode has the correct Bundle Identifier and signing settings
-          # You might also need to sign the macOS app bundle separately if flutter build macos --release
-          # doesn't handle all aspects of signing required for notarization/App Store.
-          # For notarization, you'd typically use `xcodebuild -exportArchive` and then `notarytool`
-          # but Codemagic's `app_store_connect` for macOS handles some of this.
 
     # --- Artifacts Definition ---
     artifacts:
@@ -107,34 +100,23 @@ workflows:
     publishing:
       email:
         recipients:
-          - pegumaxinc@gmail.com # Replace with your actual email
+          - pegumaxinc@gmail.com
         notify:
           success: true
           failure: true
 
-      # --- Publish to App Store Connect (for iOS) ---
+      # --- Publish to App Store Connect (for iOS and potentially macOS) ---
       app_store_connect:
-        api_key:
-          name: "${APP_STORE_CONNECT_KEY_NAME}" # Reference the API key name variable
-        # For iOS, you typically upload to App Store Connect first (which includes TestFlight)
+        auth: integration # <<-- THIS IS THE CRITICAL FIX for the second error
         # submit_to_testflight: true # Uncomment to submit to TestFlight automatically
         # build_number:
-        #   source: codemagic # or app_store, or xcode (depends on your versioning strategy)
+        #   source: codemagic
         # version_number:
-        #   source: project # or app_store
+        #   source: project
         # submit_to_app_store: true # Only enable after TestFlight testing is complete
         # release_type: manual # or automatic
-
-      # --- Publish to App Store Connect (for macOS) ---
-      # NOTE: macOS App Store Connect publishing is a separate block from iOS.
-      # You'll need to configure this similarly to iOS, but specifically for macOS.
-      # This part is more complex and often requires additional steps like notarization
-      # which might not be fully automated out-of-the-box with simple app_store_connect block.
-      # It's highly recommended to get iOS publishing working first, then tackle macOS.
-      # For now, I'll leave a placeholder. You might need custom scripts for macOS notarization and upload.
-      # app_store_connect_macos: # This is just a placeholder name, Codemagic uses the same 'app_store_connect' key
-      #   api_key:
-      #     name: "${APP_STORE_CONNECT_KEY_NAME}"
-      #   # Additional macOS specific publishing options would go here
-      #   # This would typically be configured within Codemagic UI for the macOS target
-      #   # or require custom publishing scripts if you need notarization.
+        # NOTE: For macOS, while this block can upload the .ipa for iOS,
+        # uploading macOS apps to the Mac App Store is handled differently and
+        # often requires specific notarization steps which might not be covered
+        # by this standard 'app_store_connect' block alone. You may need custom
+        # scripts for full macOS automation.
