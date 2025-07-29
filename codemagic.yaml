@@ -1,4 +1,4 @@
-# .codemagic.yaml
+# codemagic.yaml
 workflows:
   ios-macos-build:
     name: iOS & macOS Release Build
@@ -75,8 +75,9 @@ workflows:
       email:
         recipients:
           - your-email@example.com # Replace with your actual email
-        success: true  # <--- FIXED: Should be a boolean value
-        failure: true  # <--- FIXED: Should be a boolean value
+        notify: # <--- CRITICAL FIX: 'notify' key added here
+          success: true  # Boolean value
+          failure: true  # Boolean value
         # Add other publishing options (like app_store_connect) here when ready
         # app_store_connect:
         #   # ... your App Store Connect config ...
