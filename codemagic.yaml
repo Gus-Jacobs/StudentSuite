@@ -1,13 +1,14 @@
 # codemagic.yaml
 #
-# This workflow is designed for building and publishing both iOS and macOS
-# release versions of your Flutter app to App Store Connect.
+# This workflow is designed for building and publishing the iOS
+# release version of your Flutter app to App Store Connect.
 # It leverages Codemagic's automatic code signing using an App Store Connect API Key.
+# macOS build and signing steps have been removed for now.
 
 workflows:
-  ios-macos-release-build:
-    name: iOS & macOS Release Build
-    instance_type: mac_mini_m1 # Use a Mac instance for Apple builds (required for iOS/macOS)
+  ios-release-build: # Renamed workflow for clarity
+    name: iOS Release Build # Renamed name for clarity
+    instance_type: mac_mini_m1 # Still requires a Mac instance for iOS builds
 
     # --- Environment Variables ---
     # These variables configure the build environment.
@@ -63,7 +64,7 @@ workflows:
           pod install
           cd ..
 
-      - name: Fetch iOS and macOS signing files
+      - name: Fetch iOS signing files
         script: |
           # Debugging: Print the bundle IDs to confirm they are available
           echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
@@ -80,18 +81,7 @@ workflows:
             --type IOS_APP_DEVELOPMENT \
             --create
           
-          # Fetch macOS App Store Distribution files for the main app
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
-            --platform MAC_OS \
-            --type MAC_APP_STORE \
-            --create
-
-          # Fetch macOS App DEVELOPMENT files for the test target
-          # Similarly for macOS, test targets usually need development profiles.
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
-            --platform MAC_OS \
-            --type MAC_APP_DEVELOPMENT \
-            --create
+          # macOS signing commands have been removed as per your request.
 
       - name: Build iOS App (IPA)
         script: |
@@ -100,18 +90,13 @@ workflows:
           flutter build ipa --release \
             --obfuscate --split-debug-info=./debug_info
 
-      - name: Build macOS App
-        script: |
-          # Build the macOS application bundle for release.
-          flutter build macos --release \
-            --obfuscate --split-debug-info=./debug_info \
-            --target-platform macos-x64
+      # The 'Build macOS App' step has been removed.
 
     # --- Artifacts ---
     # Specifies which files to save as build artifacts after the workflow completes.
     artifacts:
       - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
-      - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
+      # The macOS artifact path has been removed.
 
     # --- Publishing ---
     # Configures post-build actions, such as email notifications and App Store Connect uploads.
@@ -126,7 +111,7 @@ workflows:
       # --- App Store Connect Publishing (for iOS) ---
       # This block uploads the generated iOS IPA to App Store Connect.
       app_store_connect:
-        auth: integration # Instructs Codemagic to use the App Store Connect API Key linked via 'integrations'
+        auth: integration
         # To automatically submit to TestFlight after upload, uncomment the line below:
         # submit_to_testflight: true
         # To manage build numbers:
@@ -138,10 +123,4 @@ workflows:
         # submit_to_app_store: true
         # release_type: manual # or automatic (manual is safer initially)
 
-      # --- macOS App Store Connect Publishing (Advanced - Placeholder) ---
-      # Note: Publishing macOS apps to the Mac App Store is more involved than iOS.
-      # It often requires additional steps like notarization using `notarytool`
-      # and specific `altool` or `app_store_connect` commands for macOS.
-      # The standard `app_store_connect` block primarily handles iOS IPAs.
-      # For now, this YAML will build the macOS app and save it as an artifact.
-      # You would then manually upload and notarize it via App Store Connect or Xcode.
+      # The 'macOS App Store Connect Publishing' placeholder has been removed.
