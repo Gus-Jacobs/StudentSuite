@@ -16,7 +16,8 @@ workflows:
       cocoapods: default      # Uses the default CocoaPods version
 
       # Link the variable group where IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are stored
-      # This MUST match the name of your Variable Group in Codemagic UI.
+      # IMPORTANT: If you are using App Store Connect API Key integration,
+      # ensure CERTIFICATE_PRIVATE_KEY is NOT set in your Codemagic UI Environment Variables.
       groups:
         - variables 
 
@@ -66,37 +67,91 @@ workflows:
           echo "Verifying Podfile content after patch:"
           cat ios/Podfile | grep "platform :ios"
 
-      - name: Fetch iOS signing files
+      - name: Fetch iOS signing files and get profile UUID/Cert Name
         script: |
           echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
           # Fetch iOS App Store Distribution files for the main app (for release)
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+          # Capture the full output of the fetch command to parse it.
+          APP_STORE_FETCH_OUTPUT=$(app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
-            --create
+            --create)
+          echo "$APP_STORE_FETCH_OUTPUT" # Print the output for debugging
+
+          # Extract the 10-character alphanumeric profile ID (UUID) from the "Saved Profile" line.
+          # We look for the line that explicitly saves the main app's App Store profile,
+          # using a pattern observed in your logs ("Student Suite app").
+          APP_STORE_PROFILE_UUID=$(echo "$APP_STORE_FETCH_OUTPUT" | grep "Saved Profile IOS_APP_STORE Student Suite app" | grep -oE '\(([0-9A-Z]{10})\)' | head -1 | sed 's/[()]//g')
+          
+          # Fallback: if the specific "Student Suite app" string isn't found for some reason,
+          # try to extract from any saved App Store profile line for the main bundle ID.
+          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
+            APP_STORE_PROFILE_UUID=$(echo "$APP_STORE_FETCH_OUTPUT" | grep "Saved Profile IOS_APP_STORE" | grep "${IOS_BUNDLE_ID}" | grep -oE '\(([0-9A-Z]{10})\)' | head -1 | sed 's/[()]//g')
+          fi
+
+          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
+            echo "Error: Could not fetch App Store provisioning profile UUID. Check App Store Connect integration and bundle ID. Raw output was: $APP_STORE_FETCH_OUTPUT"
+            exit 1
+          fi
+          echo "Extracted App Store Profile UUID: $APP_STORE_PROFILE_UUID"
           
           # Fetch iOS App DEVELOPMENT files for the test target
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
             --type IOS_APP_DEVELOPMENT \
             --create
           
-          # No need to extract UUID or Cert Name here manually.
-          # xcode-project use-profiles --export-options-plist will handle it.
+          # Get the exact name of the iOS Distribution certificate.
+          # This assumes you have one 'Apple Distribution' certificate available.
+          IOS_DISTRIBUTION_CERT_NAME=$(security find-identity -p codesigning -v | grep "Apple Distribution" | head -1 | sed -E 's/.*"(Apple Distribution: .*)"/\1/')
+          if [ -z "$IOS_DISTRIBUTION_CERT_NAME" ]; then
+            echo "Error: Could not find iOS Distribution certificate name. Ensure a valid 'Apple Distribution' certificate is available via your App Store Connect API Key."
+            exit 1
+          fi
+          echo "Found iOS Distribution Certificate Name: $IOS_DISTRIBUTION_CERT_NAME"
 
-      - name: Apply Xcode code signing settings and Generate ExportOptions.plist
+          # Export these variables so they are available in subsequent steps in this workflow
+          echo "export APP_STORE_PROFILE_UUID=$APP_STORE_PROFILE_UUID" >> $CM_ENV
+          echo "export IOS_DISTRIBUTION_CERT_NAME='$IOS_DISTRIBUTION_CERT_NAME'" >> $CM_ENV
+
+      - name: Apply Xcode code signing settings
         script: |
           echo "Applying fetched code signing profiles to Xcode project and keychain..."
           # This command ensures the fetched certificates are added to the keychain
           # and the profiles are installed for Xcode to find.
           keychain add-certificates # Explicitly add certificates to the keychain
           
-          # This command configures the Xcode project to use the fetched profiles
-          # AND generates the export_options.plist with the correct details.
-          xcode-project use-profiles \
-            --export-options-path "$CM_BUILD_DIR/ios/export_options.plist" \
-            --export-method "app-store" # Specify the export method here
-          
+          # This configures the Xcode project to use the profiles for the build.
+          # Note: The xcode-project use-profiles command does not support
+          # --export-options-path or --export-method in this Codemagic version.
+          xcode-project use-profiles
+
+      - name: Create ExportOptions.plist
+        script: |
+          echo "Manually creating ExportOptions.plist for App Store distribution..."
+          # Use the captured UUID and certificate name to construct the plist.
+          cat << EOF > "$CM_BUILD_DIR/ios/export_options.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>26499NZDJJ</string> <key>uploadBitcode</key>
+            <true/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>signingCertificate</key>
+            <string>$IOS_DISTRIBUTION_CERT_NAME</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${IOS_BUNDLE_ID}</key>
+              <string>$APP_STORE_PROFILE_UUID</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
           echo "Generated export_options.plist content:"
           cat "$CM_BUILD_DIR/ios/export_options.plist"
 
