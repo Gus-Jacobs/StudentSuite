@@ -87,14 +87,8 @@ workflows:
           cat ios/Podfile | grep "platform :ios" # Just to show the line in logs
 
 
-      # The separate 'Install iOS Pods' step is now redundant because 'flutter pub get' handles it.
-      # It's removed here to simplify the flow.
-      # - name: Install iOS Pods
-      #   script: |
-      #     cd ios
-      #     pod install
-      #     cd ..
-
+      # The separate 'Install iOS Pods' step is redundant because 'flutter pub get' handles it.
+      # It has been removed.
 
       - name: Fetch iOS signing files
         script: |
@@ -113,7 +107,17 @@ workflows:
             --type IOS_APP_DEVELOPMENT \
             --create
           
-          # macOS signing commands have been removed as per your request.
+      - name: Generate ExportOptions.plist
+        script: |
+          echo "Generating ExportOptions.plist for App Store distribution..."
+          # Use your exact 10-character Apple Developer Team ID here
+          app-store-connect generate-export-options \
+            --team-id "26499NZDJJ" \
+            --bundle-id "${IOS_BUNDLE_ID}" \
+            --output-path "$CM_BUILD_DIR/ios/export_options.plist" \
+            --type "app-store" 
+          echo "Generated export_options.plist content:"
+          cat "$CM_BUILD_DIR/ios/export_options.plist"
 
       - name: Apply Xcode code signing settings
         script: |
@@ -130,13 +134,16 @@ workflows:
           # The bundle ID is configured in your Xcode project's files (e.g., project.pbxproj).
           # xcode-project use-profiles should have configured the project for manual signing.
           flutter build ipa --release \
-            --obfuscate --split-debug-info=./debug_info
-            # No --archive-xcargs needed here, as xcode-project use-profiles handles it.
-
+            --obfuscate --split-debug-info=./debug_info \
+            --export-options-plist="$CM_BUILD_DIR/ios/export_options.plist" # Tell flutter build to use this plist
+          
     # --- Artifacts ---
     # Specifies which files to save as build artifacts after the workflow completes.
     artifacts:
-      - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
+      # This is the most common output path for flutter build ipa
+      # IMPORTANT: If your logs from 'Build iOS App (IPA)' show a different path
+      # (e.g., just 'build/ios/Runner.ipa'), update this path accordingly.
+      - build/ios/ipa/Runner.ipa 
 
     # --- Publishing ---
     # Configures post-build actions, such as email notifications and App Store Connect uploads.
