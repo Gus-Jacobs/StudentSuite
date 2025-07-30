@@ -79,8 +79,7 @@ workflows:
           echo "--- Diagnostic: Listing Certificates with the new API Key ---"
           # This command will attempt to list your distribution certificates using the configured API key.
           # If this fails, it means the API Key connection itself is the issue.
-          # !! IMPORTANT: Replace 'YOUR_APPLE_TEAM_ID' with your actual 10-character Apple Developer Team ID.
-          app-store-connect list-certificates --type IOS_DISTRIBUTION --team-id 26499NZDJJ 
+          app-store-connect list-certificates --type IOS_DISTRIBUTION # <-- CORRECTED: Removed --team-id
           echo "--- End Diagnostic ---"
 
           # Fetch iOS App Store Distribution files for the main app (for release)
@@ -226,4 +225,3 @@ workflows:
         # To automatically submit to the App Store (after TestFlight testing):
         # submit_to_app_store: true
         # release_type: manual # or automatic (manual is safer initially)
-        
