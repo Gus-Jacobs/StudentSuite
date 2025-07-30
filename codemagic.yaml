@@ -27,7 +27,7 @@ workflows:
     integrations:
       # !! IMPORTANT: Make sure "Codemagic New Signing Key" below EXACTLY matches the name
       # of your App Store Connect API Key configured in Codemagic Integrations (the one with Developer role).
-      app_store_connect: "Codemagic New Signing Key" 
+      app_store_connect: "Admin Key" 
 
     # --- Triggering ---
     triggering:
