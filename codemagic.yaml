@@ -1,0 +1,126 @@
+# codemagic.yaml
+#
+# This workflow is designed for building and publishing the iOS
+# release version of your Flutter app to App Store Connect.
+# It leverages Codemagic's automatic code signing using an App Store Connect API Key.
+# macOS build and signing steps have been removed for now.
+
+workflows:
+  ios-release-build: # Renamed workflow for clarity
+    name: iOS Release Build # Renamed name for clarity
+    instance_type: mac_mini_m1 # Still requires a Mac instance for iOS builds
+
+    # --- Environment Variables ---
+    # These variables configure the build environment.
+    # IMPORTANT: Ensure IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are set in
+    # Codemagic UI Environment Variables, and that your "variables" group is linked.
+    environment:
+      flutter: stable       # Specifies the Flutter channel to use
+      xcode: latest         # Uses the latest available Xcode version on Codemagic
+      cocoapods: default    # Uses the default CocoaPods version
+
+      # Link the variable group where IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are stored
+      # This MUST match the name of your Variable Group in Codemagic UI.
+      groups:
+        - variables 
+
+      # Firebase Environment Variables (if your app uses Firebase)
+      # If these are also in your "variables" group, they will be loaded.
+      # FLUTTER_APP_FIREBASE_API_KEY: your_api_key
+      # FLUTTER_APP_FIREBASE_APP_ID: your_app_id
+      # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID: your_Messaginger_id
+      # FLUTTER_APP_FIREBASE_PROJECT_ID: your_project_id
+      # FLUTTER_APP_FIREBASE_STORAGE_BUCKET: your_storage_bucket
+
+    # --- Integrations ---
+    # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
+    # It tells Codemagic which key to use for fetching signing files and publishing.
+    integrations:
+      app_store_connect: "Codemagic Integration Key" # Replace with the exact name of your API key in Codemagic Integrations
+
+    # --- Triggering ---
+    # Defines when this workflow should be triggered.
+    triggering:
+      branch_patterns:
+        - pattern: 'main' # Trigger this release build workflow on pushes to the 'main' branch
+          include: true
+
+    # --- Build Steps (Scripts) ---
+    # The sequence of commands to execute during the build.
+    scripts:
+      - name: Set up Flutter
+        script: |
+          flutter channel $FLUTTER_CHANNEL
+          flutter upgrade
+          flutter doctor
+
+      - name: Get dependencies
+        script: |
+          flutter pub get
+
+      - name: Install iOS Pods
+        script: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Fetch iOS signing files
+        script: |
+          # Debugging: Print the bundle IDs to confirm they are available
+          echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
+          echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
+
+          # Fetch iOS App Store Distribution files for the main app (for release)
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+            --type IOS_APP_STORE \
+            --create
+
+          # Fetch iOS App DEVELOPMENT files for the test target
+          # Test targets typically use development profiles for compilation/signing during a build.
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
+            --type IOS_APP_DEVELOPMENT \
+            --create
+          
+          # macOS signing commands have been removed as per your request.
+
+      - name: Build iOS App (IPA)
+        script: |
+          # Build the iOS application package (IPA) for release.
+          # The bundle ID is configured in your Xcode project's files (e.g., project.pbxproj).
+          flutter build ipa --release \
+            --obfuscate --split-debug-info=./debug_info
+
+      # The 'Build macOS App' step has been removed.
+
+    # --- Artifacts ---
+    # Specifies which files to save as build artifacts after the workflow completes.
+    artifacts:
+      - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
+      # The macOS artifact path has been removed.
+
+    # --- Publishing ---
+    # Configures post-build actions, such as email notifications and App Store Connect uploads.
+    publishing:
+      email:
+        recipients:
+          - pegumaxinc@gmail.com
+        notify:
+          success: true
+          failure: true
+
+      # --- App Store Connect Publishing (for iOS) ---
+      # This block uploads the generated iOS IPA to App Store Connect.
+      app_store_connect:
+        auth: integration
+        # To automatically submit to TestFlight after upload, uncomment the line below:
+        # submit_to_testflight: true
+        # To manage build numbers:
+        # build_number:
+        #   source: codemagic # Codemagic assigns a unique build number
+        # version_number:
+        #   source: project # Uses version from pubspec.yaml and Info.plist
+        # To automatically submit to the App Store (after TestFlight testing):
+        # submit_to_app_store: true
+        # release_type: manual # or automatic (manual is safer initially)
+
+      # The 'macOS App Store Connect Publishing' placeholder has been removed.
