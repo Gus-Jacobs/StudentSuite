@@ -25,9 +25,9 @@ workflows:
     # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
     # It tells Codemagic which key to use for fetching signing files and publishing.
     integrations:
-      # !! IMPORTANT: Make sure "Codemagic New Signing Key" below EXACTLY matches the name
-      # of your App Store Connect API Key configured in Codemagic Integrations (the one with Developer role).
-      app_store_connect: "Admin Key" 
+      # !! IMPORTANT: Make sure "Admin Key" below EXACTLY matches the name
+      # of your App Store Connect API Key configured in Codemagic Integrations (the one with Admin role).
+      app_store_connect: "Admin Key" # <-- Ensure this name is correct and matches Codemagic UI
 
     # --- Triggering ---
     triggering:
@@ -77,19 +77,22 @@ workflows:
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
           echo "--- Diagnostic: Listing Certificates with the new API Key ---"
-          # This command will attempt to list your distribution certificates using the configured API key.
-          # If this fails, it means the API Key connection itself is the issue.
-          app-store-connect list-certificates --type IOS_DISTRIBUTION # <-- CORRECTED: Removed --team-id
+          # This command will attempt to list your certificates.
+          # We're now using the non-deprecated command and specifically checking for APPLE_DISTRIBUTION.
+          # Adding -v for verbose output.
+          app-store-connect -v certificates list --type APPLE_DISTRIBUTION # <-- CRITICAL CHANGE HERE
           echo "--- End Diagnostic ---"
 
           # Fetch iOS App Store Distribution files for the main app (for release)
-          # This command saves the profiles to a standard location.
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+          # This command saves the profiles to a standard location and will create cert/profile if needed.
+          # Adding -v for verbose output.
+          app-store-connect -v fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
             --create
 
           # Fetch iOS App DEVELOPMENT files for the test target
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
+          # Adding -v for verbose output.
+          app-store-connect -v fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
             --type IOS_APP_DEVELOPMENT \
             --create
 
@@ -136,9 +139,10 @@ workflows:
 
           # Get the exact name of the iOS Distribution certificate.
           # This assumes you have one 'Apple Distribution' certificate available.
-          IOS_DISTRIBUTION_CERT_NAME=$(security find-identity -p codesigning -v | grep "Apple Distribution" | head -1 | sed -E 's/.*"(Apple Distribution: .*)"/\1/')
+          # Expanded grep to also check for 'iPhone Distribution' for broader compatibility.
+          IOS_DISTRIBUTION_CERT_NAME=$(security find-identity -p codesigning -v | grep -E "Apple Distribution|iPhone Distribution" | head -1 | sed -E 's/.*"(Apple Distribution|iPhone Distribution): .*)"/\1/')
           if [ -z "$IOS_DISTRIBUTION_CERT_NAME" ]; then
-            echo "Error: Could not find iOS Distribution certificate name. Ensure a valid 'Apple Distribution' certificate is available via your App Store Connect API Key."
+            echo "Error: Could not find iOS Distribution certificate name. Ensure a valid 'Apple Distribution' or 'iPhone Distribution' certificate is available via your App Store Connect API Key."
             exit 1
           fi
           echo "Found iOS Distribution Certificate Name: '$IOS_DISTRIBUTION_CERT_NAME'"
@@ -202,7 +206,7 @@ workflows:
       - build/ios/ipa/Runner.ipa 
 
     # --- Publishing ---
-    # Configures post-build actions, such as email notifications and App Store Connect uploads.
+    # Configures post-build actions, suchs as email notifications and App Store Connect uploads.
     publishing:
       email:
         recipients:
