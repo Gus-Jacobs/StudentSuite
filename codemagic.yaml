@@ -19,11 +19,12 @@ workflows:
       cocoapods: default    # Uses the default CocoaPods version
 
       # Link the variable group where IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are stored
+      # This MUST match the name of your Variable Group in Codemagic UI.
       groups:
-        - variables # <<-- This links your "variables" group
+        - variables 
 
       # Firebase Environment Variables (if your app uses Firebase)
-      # These should also be in the 'variables' group or another group you import.
+      # If these are also in your "variables" group, they will be loaded.
       # FLUTTER_APP_FIREBASE_API_KEY: your_api_key
       # FLUTTER_APP_FIREBASE_APP_ID: your_app_id
       # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID: your_Messaginger_id
@@ -48,32 +49,39 @@ workflows:
     scripts:
       - name: Set up Flutter
         script: |
+          # Set the Flutter channel, upgrade, and run doctor for diagnostics
           flutter channel $FLUTTER_CHANNEL
           flutter upgrade
           flutter doctor
 
       - name: Get dependencies
         script: |
+          # Fetch Flutter package dependencies
           flutter pub get
 
       - name: Install iOS Pods
         script: |
+          # Navigate to the iOS project directory and install CocoaPods dependencies
           cd ios
           pod install
-          cd ..
+          cd .. # Navigate back to the root of the Flutter project
 
       - name: Fetch iOS and macOS signing files
         script: |
           # Debugging: Print the bundle ID to confirm it's available
-          echo "Using Bundle ID for signing: ${IOS_BUNDLE_ID}"
+          echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
+          echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
           
           # Fetch iOS App Store Distribution files (certificate and provisioning profile)
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+          # Provide both the main app bundle ID and the test target bundle ID.
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" "${IOS_BUNDLE_ID}.RunnerTests" \
             --type IOS_APP_STORE \
             --create
           
           # Fetch macOS App Store Distribution files (certificate and provisioning profile)
-          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+          # macOS app's test targets also need proper provisioning if they exist.
+          # Assuming macOS also has a similar test target structure.
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" "${IOS_BUNDLE_ID}.RunnerTests" \
             --platform MAC_OS \
             --type MAC_APP_STORE \
             --create
@@ -82,13 +90,16 @@ workflows:
         script: |
           # Build the iOS application package (IPA) for release.
           # Note: --bundle-id is NOT a valid option for `flutter build ipa`.
-          # The bundle ID is configured in your Xcode project.
+          # The bundle ID is configured in your Xcode project's files (e.g., project.pbxproj).
           flutter build ipa --release \
             --obfuscate --split-debug-info=./debug_info
 
       - name: Build macOS App
         script: |
           # Build the macOS application bundle for release.
+          # --release: Builds a release version.
+          # --obfuscate, --split-debug-info: For code obfuscation and debug info separation.
+          # --target-platform macos-x64: Targets Intel macOS. Remove if you want a universal binary by default on M1/M2.
           flutter build macos --release \
             --obfuscate --split-debug-info=./debug_info \
             --target-platform macos-x64
@@ -96,22 +107,23 @@ workflows:
     # --- Artifacts ---
     # Specifies which files to save as build artifacts after the workflow completes.
     artifacts:
-      - build/ios/Runner.ipa
-      - build/macos/Build/Products/Release/*.app.zip
+      - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
+      - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
 
     # --- Publishing ---
-    # Configures post-build actions, suchs as email notifications and App Store Connect uploads.
+    # Configures post-build actions, such as email notifications and App Store Connect uploads.
     publishing:
       email:
         recipients:
-          - pegumaxinc@gmail.com
+          - pegumaxinc@gmail.com # Replace with your actual email address
         notify:
-          success: true
-          failure: true
+          success: true # Notify on successful builds
+          failure: true # Notify on failed builds
 
       # --- App Store Connect Publishing (for iOS) ---
+      # This block uploads the generated iOS IPA to App Store Connect.
       app_store_connect:
-        auth: integration
+        auth: integration # Instructs Codemagic to use the App Store Connect API Key linked via 'integrations'
         # To automatically submit to TestFlight after upload, uncomment the line below:
         # submit_to_testflight: true
         # To manage build numbers:
@@ -124,7 +136,7 @@ workflows:
         # release_type: manual # or automatic (manual is safer initially)
 
       # --- macOS App Store Connect Publishing (Advanced - Placeholder) ---
-      # Publishing macOS apps to the Mac App Store is more involved than iOS.
+      # Note: Publishing macOS apps to the Mac App Store is more involved than iOS.
       # It often requires additional steps like notarization using `notarytool`
       # and specific `altool` or `app_store_connect` commands for macOS.
       # The standard `app_store_connect` block primarily handles iOS IPAs.
