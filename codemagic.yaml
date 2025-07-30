@@ -77,22 +77,38 @@ workflows:
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
           # Fetch iOS App Store Distribution files for the main app (for release)
-          # Capture the output to get the UUID of the fetched profile.
-          # We expect fetch-signing-files to print the UUID on success.
-          APP_STORE_PROFILE_UUID=$(app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+          # This command saves the profiles to a standard location.
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
-            --create | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-
+            --create
+          
           # Fetch iOS App DEVELOPMENT files for the test target
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
             --type IOS_APP_DEVELOPMENT \
             --create
           
-          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
-            echo "Error: Could not fetch App Store provisioning profile UUID. Check App Store Connect integration and bundle ID."
+          # Now, find the actual path of the saved App Store provisioning profile for the main app.
+          # This is more robust than parsing the stdout of fetch-signing-files directly for the UUID
+          # as the UUID is part of the filename after it's saved.
+          # We look for a file that contains the main bundle ID in its name and is an iOS App Store profile.
+          APP_STORE_PROFILE_PATH=$(find "/Users/builder/Library/MobileDevice/Provisioning Profiles/" -name "*IOS_APP_STORE*${IOS_BUNDLE_ID}*.mobileprovision" -type f -print -quit)
+          
+          if [ -z "$APP_STORE_PROFILE_PATH" ]; then
+            echo "Error: Could not find the saved App Store provisioning profile for bundle ID ${IOS_BUNDLE_ID}. Check App Store Connect integration and bundle ID."
             exit 1
           fi
-          echo "Fetched App Store Profile UUID: $APP_STORE_PROFILE_UUID"
+          echo "Found App Store Profile Path: $APP_STORE_PROFILE_PATH"
+
+          # Extract the UUID from the filename using basename and sed.
+          # Example filename: IOS_APP_STORE_ZB4HZ3V3W5_c84h7xpf.mobileprovision
+          APP_STORE_PROFILE_BASENAME=$(basename "$APP_STORE_PROFILE_PATH")
+          APP_STORE_PROFILE_UUID=$(echo "$APP_STORE_PROFILE_BASENAME" | sed -E 's/IOS_APP_STORE_([0-9A-Z]{10})_.*\.mobileprovision/\1/')
+          
+          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
+            echo "Error: Could not extract UUID from profile path: $APP_STORE_PROFILE_PATH"
+            exit 1
+          fi
+          echo "Extracted App Store Profile UUID: $APP_STORE_PROFILE_UUID"
           
           # Get the exact name of the iOS Distribution certificate.
           # This assumes you have one 'Apple Distribution' certificate.
@@ -122,7 +138,8 @@ workflows:
             <key>method</key>
             <string>app-store</string>
             <key>teamID</key>
-            <string>26499NZDJJ</string> <key>uploadBitcode</key>
+            <string>26499NZDJJ</string> <!-- Use your actual 10-character Apple Developer Team ID -->
+            <key>uploadBitcode</key>
             <true/>
             <key>uploadSymbols</key>
             <true/>
@@ -141,11 +158,11 @@ workflows:
 
       - name: Apply Xcode code signing settings
         script: |
-          echo "Applying fetched code signing profiles to Xcode project..."
-          # This command instructs Xcode to use the certificates and profiles
-          # fetched by app-store-connect fetch-signing-files.
-          # It handles setting CODE_SIGN_STYLE to Manual and injecting the correct profiles.
-          xcode-project use-profiles
+          echo "Applying fetched code signing profiles to Xcode project and keychain..."
+          # This command ensures the fetched certificates are added to the keychain
+          # and the profiles are installed for Xcode to find.
+          keychain add-certificates # Explicitly add certificates to the keychain
+          xcode-project use-profiles # Configures Xcode project to use the fetched profiles
 
       - name: Build iOS App (IPA)
         script: |
