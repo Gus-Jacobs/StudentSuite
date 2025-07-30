@@ -78,9 +78,9 @@ workflows:
 
           echo "--- Diagnostic: Listing Certificates with the new API Key ---"
           # This command will attempt to list your certificates.
-          # We're now using the non-deprecated command and specifically checking for APPLE_DISTRIBUTION.
+          # We're now using the non-deprecated command and the CORRECT 'DISTRIBUTION' type.
           # Adding -v for verbose output.
-          app-store-connect -v certificates list --type APPLE_DISTRIBUTION # <-- CRITICAL CHANGE HERE
+          app-store-connect -v certificates list --type DISTRIBUTION # <-- CRITICAL FIX HERE!
           echo "--- End Diagnostic ---"
 
           # Fetch iOS App Store Distribution files for the main app (for release)
