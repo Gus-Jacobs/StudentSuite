@@ -25,7 +25,7 @@ workflows:
     # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
     # It tells Codemagic which key to use for fetching signing files and publishing.
     integrations:
-      app_store_connect: "Codemagic Integration Key" # Replace with the exact name of your API key in Codemagic Integrations
+      app_store_connect: "Codemagic Signing Key" # <--- UPDATED: Using the new key name
 
     # --- Triggering ---
     triggering:
@@ -68,7 +68,7 @@ workflows:
           cat ios/Podfile | grep "platform :ios"
 
       - name: Fetch iOS signing files and get profile UUID/Cert Name
-        script: | # <--- THIS 'script: |' WAS MISSING OR MISPLACED BEFORE
+        script: |
           echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
@@ -192,7 +192,7 @@ workflows:
       - build/ios/ipa/Runner.ipa 
 
     # --- Publishing ---
-    # Configures post-build actions, suchs as email notifications and App Store Connect uploads.
+    # Configures post-build actions, such as email notifications and App Store Connect uploads.
     publishing:
       email:
         recipients:
@@ -215,4 +215,3 @@ workflows:
         # To automatically submit to the App Store (after TestFlight testing):
         # submit_to_app_store: true
         # release_type: manual # or automatic (manual is safer initially)
-      
