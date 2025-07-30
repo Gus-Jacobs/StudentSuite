@@ -27,7 +27,7 @@ workflows:
       # If these are also in your "variables" group, they will be loaded.
       # FLUTTER_APP_FIREBASE_API_KEY: your_api_key
       # FLUTTER_APP_FIREBASE_APP_ID: your_app_id
-      # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID: your_messaging_sender_id
+      # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID: your_Messaginger_id
       # FLUTTER_APP_FIREBASE_PROJECT_ID: your_project_id
       # FLUTTER_APP_FIREBASE_STORAGE_BUCKET: your_storage_bucket
 
@@ -69,16 +69,15 @@ workflows:
           echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
-          # Fetch iOS App Store Distribution files for the main app
+          # Fetch iOS App Store Distribution files for the main app (for release)
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
             --create
 
-          # Fetch iOS App Store Distribution files for the test target
-          # Note: Test targets often use Development profiles, but for release builds
-          # and if the test target is part of the final artifact, App Store type might be used.
+          # Fetch iOS App DEVELOPMENT files for the test target
+          # Test targets typically use development profiles for compilation/signing during a build.
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
-            --type IOS_APP_STORE \
+            --type IOS_APP_DEVELOPMENT \
             --create
           
           # Fetch macOS App Store Distribution files for the main app
@@ -87,10 +86,11 @@ workflows:
             --type MAC_APP_STORE \
             --create
 
-          # Fetch macOS App Store Distribution files for the test target
+          # Fetch macOS App DEVELOPMENT files for the test target
+          # Similarly for macOS, test targets usually need development profiles.
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
             --platform MAC_OS \
-            --type MAC_APP_STORE \
+            --type MAC_APP_DEVELOPMENT \
             --create
 
       - name: Build iOS App (IPA)
@@ -124,12 +124,22 @@ workflows:
           failure: true
 
       # --- App Store Connect Publishing (for iOS) ---
+      # This block uploads the generated iOS IPA to App Store Connect.
       app_store_connect:
-        auth: integration
+        auth: integration # Instructs Codemagic to use the App Store Connect API Key linked via 'integrations'
+        # To automatically submit to TestFlight after upload, uncomment the line below:
         # submit_to_testflight: true
+        # To manage build numbers:
+        # build_number:
+        #   source: codemagic # Codemagic assigns a unique build number
+        # version_number:
+        #   source: project # Uses version from pubspec.yaml and Info.plist
+        # To automatically submit to the App Store (after TestFlight testing):
+        # submit_to_app_store: true
+        # release_type: manual # or automatic (manual is safer initially)
 
       # --- macOS App Store Connect Publishing (Advanced - Placeholder) ---
-      # Publishing macOS apps to the Mac App Store is more involved than iOS.
+      # Note: Publishing macOS apps to the Mac App Store is more involved than iOS.
       # It often requires additional steps like notarization using `notarytool`
       # and specific `altool` or `app_store_connect` commands for macOS.
       # The standard `app_store_connect` block primarily handles iOS IPAs.
