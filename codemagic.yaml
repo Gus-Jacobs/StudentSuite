@@ -25,7 +25,7 @@ workflows:
     # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
     # It tells Codemagic which key to use for fetching signing files and publishing.
     integrations:
-      app_store_connect: "Codemagic Signing Key" # <--- UPDATED: Using the new key name
+      app_store_connect: "Codemagic New Signing Key" # <--- UPDATED: Using the new key name
 
     # --- Triggering ---
     triggering:
