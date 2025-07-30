@@ -58,26 +58,20 @@ workflows:
           flutter pub get
           
           echo "Patching Podfile to set iOS deployment target to 15.0..."
-          # This sed command is for macOS (due to -i '').
-          # It first tries to uncomment and set the version if the line exists.
-          # Then, it tries to insert the line if it's completely missing after a known comment.
           if grep -q "platform :ios," ios/Podfile; then
               sed -i '' "s/^#* *platform :ios, '\(.*\)'/platform :ios, '15.0'/" ios/Podfile
           else
-              # Fallback: if 'platform :ios' line is completely missing, insert it
               sed -i '' "/# Uncomment this line to define a global platform for your project/a\platform :ios, '15.0'" ios/Podfile
           fi
-          
           echo "Verifying Podfile content after patch:"
-          cat ios/Podfile | grep "platform :ios" # Just to show the line in logs
+          cat ios/Podfile | grep "platform :ios"
 
-      - name: Fetch iOS signing files and get profile UUID/Cert Name
+      - name: Fetch iOS signing files
         script: |
           echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
           # Fetch iOS App Store Distribution files for the main app (for release)
-          # This command saves the profiles to a standard location.
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
             --create
@@ -87,82 +81,24 @@ workflows:
             --type IOS_APP_DEVELOPMENT \
             --create
           
-          # Now, find the actual path of the saved App Store provisioning profile for the main app.
-          # This is more robust than parsing the stdout of fetch-signing-files directly for the UUID
-          # as the UUID is part of the filename after it's saved.
-          # We look for a file that contains the main bundle ID in its name and is an iOS App Store profile.
-          APP_STORE_PROFILE_PATH=$(find "/Users/builder/Library/MobileDevice/Provisioning Profiles/" -name "*IOS_APP_STORE*${IOS_BUNDLE_ID}*.mobileprovision" -type f -print -quit)
-          
-          if [ -z "$APP_STORE_PROFILE_PATH" ]; then
-            echo "Error: Could not find the saved App Store provisioning profile for bundle ID ${IOS_BUNDLE_ID}. Check App Store Connect integration and bundle ID."
-            exit 1
-          fi
-          echo "Found App Store Profile Path: $APP_STORE_PROFILE_PATH"
+          # No need to extract UUID or Cert Name here manually.
+          # xcode-project use-profiles --export-options-plist will handle it.
 
-          # Extract the UUID from the filename using basename and sed.
-          # Example filename: IOS_APP_STORE_ZB4HZ3V3W5_c84h7xpf.mobileprovision
-          APP_STORE_PROFILE_BASENAME=$(basename "$APP_STORE_PROFILE_PATH")
-          APP_STORE_PROFILE_UUID=$(echo "$APP_STORE_PROFILE_BASENAME" | sed -E 's/IOS_APP_STORE_([0-9A-Z]{10})_.*\.mobileprovision/\1/')
-          
-          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
-            echo "Error: Could not extract UUID from profile path: $APP_STORE_PROFILE_PATH"
-            exit 1
-          fi
-          echo "Extracted App Store Profile UUID: $APP_STORE_PROFILE_UUID"
-          
-          # Get the exact name of the iOS Distribution certificate.
-          # This assumes you have one 'Apple Distribution' certificate.
-          # If you have multiple, you might need to refine this grep.
-          IOS_DISTRIBUTION_CERT_NAME=$(security find-identity -p codesigning -v | grep "Apple Distribution" | head -1 | sed -E 's/.*"(Apple Distribution: .*)"/\1/')
-          if [ -z "$IOS_DISTRIBUTION_CERT_NAME" ]; then
-            echo "Error: Could not find iOS Distribution certificate name. Ensure a valid 'Apple Distribution' certificate is available via your App Store Connect API Key."
-            exit 1
-          fi
-          echo "Found iOS Distribution Certificate Name: $IOS_DISTRIBUTION_CERT_NAME"
-
-          # Export these variables so they are available in subsequent steps in this workflow
-          echo "export APP_STORE_PROFILE_UUID=$APP_STORE_PROFILE_UUID" >> $CM_ENV
-          echo "export IOS_DISTRIBUTION_CERT_NAME='$IOS_DISTRIBUTION_CERT_NAME'" >> $CM_ENV
-
-      - name: Create ExportOptions.plist
-        script: |
-          echo "Manually creating ExportOptions.plist for App Store distribution..."
-          # This XML structure explicitly tells Xcode how to export the archive.
-          # It specifies 'app-store' for distribution and includes the team ID,
-          # the specific signing certificate, and the provisioning profile UUID.
-          cat << EOF > "$CM_BUILD_DIR/ios/export_options.plist"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>teamID</key>
-            <string>26499NZDJJ</string> <!-- Use your actual 10-character Apple Developer Team ID -->
-            <key>uploadBitcode</key>
-            <true/>
-            <key>uploadSymbols</key>
-            <true/>
-            <key>signingCertificate</key>
-            <string>$IOS_DISTRIBUTION_CERT_NAME</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>${IOS_BUNDLE_ID}</key>
-              <string>$APP_STORE_PROFILE_UUID</string>
-            </dict>
-          </dict>
-          </plist>
-          EOF
-          echo "Generated export_options.plist content:"
-          cat "$CM_BUILD_DIR/ios/export_options.plist"
-
-      - name: Apply Xcode code signing settings
+      - name: Apply Xcode code signing settings and Generate ExportOptions.plist
         script: |
           echo "Applying fetched code signing profiles to Xcode project and keychain..."
           # This command ensures the fetched certificates are added to the keychain
           # and the profiles are installed for Xcode to find.
           keychain add-certificates # Explicitly add certificates to the keychain
-          xcode-project use-profiles # Configures Xcode project to use the fetched profiles
+          
+          # This command configures the Xcode project to use the fetched profiles
+          # AND generates the export_options.plist with the correct details.
+          xcode-project use-profiles \
+            --export-options-path "$CM_BUILD_DIR/ios/export_options.plist" \
+            --export-method "app-store" # Specify the export method here
+          
+          echo "Generated export_options.plist content:"
+          cat "$CM_BUILD_DIR/ios/export_options.plist"
 
       - name: Build iOS App (IPA)
         script: |
