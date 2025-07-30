@@ -87,9 +87,6 @@ workflows:
           cat ios/Podfile | grep "platform :ios" # Just to show the line in logs
 
 
-      # The separate 'Install iOS Pods' step is redundant because 'flutter pub get' handles it.
-      # It has been removed.
-
       - name: Fetch iOS signing files
         script: |
           # Debugging: Print the bundle IDs to confirm they are available
@@ -107,24 +104,32 @@ workflows:
             --type IOS_APP_DEVELOPMENT \
             --create
           
-      - name: Generate ExportOptions.plist
+      - name: Create ExportOptions.plist
         script: |
-          echo "Generating ExportOptions.plist for App Store distribution..."
-          # Use your exact 10-character Apple Developer Team ID here
-          app-store-connect generate-export-options \
-            --team-id "26499NZDJJ" \
-            --bundle-id "${IOS_BUNDLE_ID}" \
-            --output-path "$CM_BUILD_DIR/ios/export_options.plist" \
-            --type "app-store" 
+          echo "Manually creating ExportOptions.plist for App Store distribution..."
+          # This XML structure explicitly tells Xcode how to export the archive.
+          # It specifies 'app-store' for distribution and includes the team ID.
+          cat << EOF > "$CM_BUILD_DIR/ios/export_options.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>26499NZDJJ</string> <key>uploadBitcode</key>
+            <true/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
           echo "Generated export_options.plist content:"
           cat "$CM_BUILD_DIR/ios/export_options.plist"
 
       - name: Apply Xcode code signing settings
         script: |
           echo "Applying fetched code signing profiles to Xcode project..."
-          # This command instructs Xcode to use the certificates and profiles
-          # fetched by app-store-connect fetch-signing-files.
-          # It handles setting CODE_SIGN_STYLE to Manual and injecting the correct profiles.
           xcode-project use-profiles
 
       - name: Build iOS App (IPA)
