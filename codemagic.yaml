@@ -88,13 +88,12 @@ workflows:
 
 
       # The separate 'Install iOS Pods' step is now redundant because 'flutter pub get' handles it.
-      # You can remove it or keep it for clarity, but it won't do much after 'flutter pub get'.
-      # Keeping it for now as it was explicitly in your original file
-      - name: Install iOS Pods (redundant after pub get, but kept for original structure)
-        script: |
-          cd ios
-          pod install # This will effectively be a no-op if flutter pub get already ran it
-          cd ..
+      # It's removed here to simplify the flow.
+      # - name: Install iOS Pods
+      #   script: |
+      #     cd ios
+      #     pod install
+      #     cd ..
 
 
       - name: Fetch iOS signing files
@@ -116,26 +115,28 @@ workflows:
           
           # macOS signing commands have been removed as per your request.
 
+      - name: Apply Xcode code signing settings
+        script: |
+          echo "Applying fetched code signing profiles to Xcode project..."
+          # This command instructs Xcode to use the certificates and profiles
+          # fetched by app-store-connect fetch-signing-files.
+          # It handles setting CODE_SIGN_STYLE to Manual and injecting the correct profiles.
+          xcode-project use-profiles
+
       - name: Build iOS App (IPA)
         script: |
           echo "Starting iOS IPA build..."
           # Build the iOS application package (IPA) for release.
           # The bundle ID is configured in your Xcode project's files (e.g., project.pbxproj).
+          # xcode-project use-profiles should have configured the project for manual signing.
           flutter build ipa --release \
-            --obfuscate --split-debug-info=./debug_info \
-            --archive-xcargs="-allowProvisioningUpdates CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=26499NZDJJ" # Use your actual Team ID
-            # IMPORTANT: Replace '26499NZDJJ' with your actual 10-character Apple Developer Team ID
-            # You can find this in your Apple Developer account under 'Membership' or in Xcode.
-            # If you have flavors (e.g., --flavor production), add it before the backslash.
-            # Example: --flavor production \
-
-      # The 'Build macOS App' step has been removed.
+            --obfuscate --split-debug-info=./debug_info
+            # No --archive-xcargs needed here, as xcode-project use-profiles handles it.
 
     # --- Artifacts ---
     # Specifies which files to save as build artifacts after the workflow completes.
     artifacts:
       - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
-      # The macOS artifact path has been removed.
 
     # --- Publishing ---
     # Configures post-build actions, such as email notifications and App Store Connect uploads.
@@ -160,5 +161,3 @@ workflows:
         # To automatically submit to the App Store (after TestFlight testing):
         # submit_to_app_store: true
         # release_type: manual # or automatic (manual is safer initially)
-
-      # The 'macOS App Store Connect Publishing' placeholder has been removed.
