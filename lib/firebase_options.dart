@@ -85,4 +85,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'student-suite-9ae1d.firebasestorage.app',
     measurementId: 'G-4MV2W5QWLE',
   );
+
 }

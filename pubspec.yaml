@@ -61,7 +61,7 @@ dependencies:
   flutter_colorpicker: ^1.1.0
   image_picker: ^1.1.2
   http: ^1.2.1 # For Canvas API requests
-  flutter_web_auth_2: ^3.1.2 # For Canvas OAuth
+  flutter_web_auth_2: ^4.1.0 # For Canvas OAuth
   flip_card: ^0.7.0 # For flashcards
   confetti: ^0.7.0 # For celebratory animations
   flutter_markdown: ^0.7.7+1 # For rendering AI responses
@@ -105,7 +105,6 @@ flutter:
     - assets/img/
     - assets/img/frames/
     - assets/fonts/
-    - assets/models/
 
 
   # An image asset can refer to one or more resolution-specific "variants", see
