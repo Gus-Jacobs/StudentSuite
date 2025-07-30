@@ -15,7 +15,7 @@ workflows:
       xcode: latest           # Uses the latest available Xcode version on Codemagic
       cocoapods: default      # Uses the default CocoaPods version
 
-      # Link the variable group where IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are stored
+      # Link the variable group where IOS_BUNDLE_ID is stored.
       # IMPORTANT: If you are using App Store Connect API Key integration,
       # ensure CERTIFICATE_PRIVATE_KEY is NOT set in your Codemagic UI Environment Variables.
       groups:
@@ -73,33 +73,39 @@ workflows:
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
 
           # Fetch iOS App Store Distribution files for the main app (for release)
-          # Capture the full output of the fetch command to parse it.
-          APP_STORE_FETCH_OUTPUT=$(app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
+          # This command saves the profiles to a standard location.
+          app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
-            --create)
-          echo "$APP_STORE_FETCH_OUTPUT" # Print the output for debugging
-
-          # Extract the 10-character alphanumeric profile ID (UUID) from the "Saved Profile" line.
-          # We look for the line that explicitly saves the main app's App Store profile,
-          # using a pattern observed in your logs ("Student Suite app").
-          APP_STORE_PROFILE_UUID=$(echo "$APP_STORE_FETCH_OUTPUT" | grep "Saved Profile IOS_APP_STORE Student Suite app" | grep -oE '\(([0-9A-Z]{10})\)' | head -1 | sed 's/[()]//g')
-          
-          # Fallback: if the specific "Student Suite app" string isn't found for some reason,
-          # try to extract from any saved App Store profile line for the main bundle ID.
-          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
-            APP_STORE_PROFILE_UUID=$(echo "$APP_STORE_FETCH_OUTPUT" | grep "Saved Profile IOS_APP_STORE" | grep "${IOS_BUNDLE_ID}" | grep -oE '\(([0-9A-Z]{10})\)' | head -1 | sed 's/[()]//g')
-          fi
-
-          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
-            echo "Error: Could not fetch App Store provisioning profile UUID. Check App Store Connect integration and bundle ID. Raw output was: $APP_STORE_FETCH_OUTPUT"
-            exit 1
-          fi
-          echo "Extracted App Store Profile UUID: $APP_STORE_PROFILE_UUID"
+            --create
           
           # Fetch iOS App DEVELOPMENT files for the test target
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}.RunnerTests" \
             --type IOS_APP_DEVELOPMENT \
             --create
+          
+          # --- NEW ROBUST WAY TO GET PROFILE UUID ---
+          # Find the path of the saved App Store provisioning profile for the main app.
+          # We look for a file that contains the main bundle ID in its content (not just filename)
+          # and is an iOS App Store profile.
+          APP_STORE_PROFILE_PATH=$(find "/Users/builder/Library/MobileDevice/Provisioning Profiles/" -type f -name "*.mobileprovision" -print0 | xargs -0 grep -l "UUID" | xargs -0 grep -l "${IOS_BUNDLE_ID}" | xargs -0 grep -l "AppStore" | head -1)
+
+          if [ -z "$APP_STORE_PROFILE_PATH" ]; then
+            echo "Error: Could not find the saved App Store provisioning profile for bundle ID ${IOS_BUNDLE_ID}. Check App Store Connect integration and bundle ID."
+            # List all profiles for debugging if it fails
+            ls -la "/Users/builder/Library/MobileDevice/Provisioning Profiles/"
+            exit 1
+          fi
+          echo "Found App Store Profile Path: $APP_STORE_PROFILE_PATH"
+
+          # Extract the UUID from the .mobileprovision file using security cms
+          APP_STORE_PROFILE_UUID=$(security cms -D -i "$APP_STORE_PROFILE_PATH" | grep UUID -A 1 | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')
+          
+          if [ -z "$APP_STORE_PROFILE_UUID" ]; then
+            echo "Error: Could not extract UUID from profile file: $APP_STORE_PROFILE_PATH"
+            security cms -D -i "$APP_STORE_PROFILE_PATH" # Print content for debugging
+            exit 1
+          fi
+          echo "Extracted App Store Profile UUID: $APP_STORE_PROFILE_UUID"
           
           # Get the exact name of the iOS Distribution certificate.
           # This assumes you have one 'Apple Distribution' certificate available.
@@ -108,7 +114,7 @@ workflows:
             echo "Error: Could not find iOS Distribution certificate name. Ensure a valid 'Apple Distribution' certificate is available via your App Store Connect API Key."
             exit 1
           fi
-          echo "Found iOS Distribution Certificate Name: $IOS_DISTRIBUTION_CERT_NAME"
+          echo "Found iOS Distribution Certificate Name: '$IOS_DISTRIBUTION_CERT_NAME'"
 
           # Export these variables so they are available in subsequent steps in this workflow
           echo "export APP_STORE_PROFILE_UUID=$APP_STORE_PROFILE_UUID" >> $CM_ENV
@@ -122,8 +128,6 @@ workflows:
           keychain add-certificates # Explicitly add certificates to the keychain
           
           # This configures the Xcode project to use the profiles for the build.
-          # Note: The xcode-project use-profiles command does not support
-          # --export-options-path or --export-method in this Codemagic version.
           xcode-project use-profiles
 
       - name: Create ExportOptions.plist
@@ -138,7 +142,8 @@ workflows:
             <key>method</key>
             <string>app-store</string>
             <key>teamID</key>
-            <string>26499NZDJJ</string> <key>uploadBitcode</key>
+            <string>26499NZDJJ</string> <!-- Your actual 10-character Apple Developer Team ID -->
+            <key>uploadBitcode</key>
             <true/>
             <key>uploadSymbols</key>
             <true/>
