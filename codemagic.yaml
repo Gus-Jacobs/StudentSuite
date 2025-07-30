@@ -11,23 +11,23 @@ workflows:
 
     # --- Environment Variables ---
     # These variables configure the build environment.
-    # IMPORTANT: Ensure IOS_BUNDLE_ID is set in Codemagic UI Environment Variables.
     environment:
       flutter: stable       # Specifies the Flutter channel to use
       xcode: latest         # Uses the latest available Xcode version on Codemagic
       cocoapods: default    # Uses the default CocoaPods version
 
+      # IMPORTANT: If IOS_BUNDLE_ID is in a variable group named "variables",
+      # you must specify the group here.
+      groups:
+        - variables # <<-- ADD THIS LINE to import variables from your "variables" group
+
       # Firebase Environment Variables (if your app uses Firebase)
-      # You MUST set these securely in Codemagic UI under Environment variables -> Secure files
+      # These should be in the 'variables' group or another group you import.
       # FLUTTER_APP_FIREBASE_API_KEY: your_api_key
       # FLUTTER_APP_FIREBASE_APP_ID: your_app_id
       # FLUTTER_APP_FIREBASE_MESSAGING_SENDER_ID: your_Messaginger_id
       # FLUTTER_APP_FIREBASE_PROJECT_ID: your_project_id
       # FLUTTER_APP_FIREBASE_STORAGE_BUCKET: your_storage_bucket
-
-      # iOS Bundle ID: This variable is used for code signing and building.
-      # It MUST be set in Codemagic UI Environment Variables.
-      # Example: IOS_BUNDLE_ID: com.pegumax.studentsuite
 
     # --- Integrations ---
     # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
@@ -41,7 +41,6 @@ workflows:
       branch_patterns:
         - pattern: 'main' # Trigger this release build workflow on pushes to the 'main' branch
           include: true
-        # You can add other branches like 'release/*' if your workflow dictates it.
 
     # --- Build Steps (Scripts) ---
     # The sequence of commands to execute during the build.
@@ -71,15 +70,11 @@ workflows:
           echo "Using Bundle ID for signing: ${IOS_BUNDLE_ID}"
           
           # Fetch iOS App Store Distribution files (certificate and provisioning profile)
-          # --type IOS_APP_STORE: Specifies that it's for App Store distribution
-          # --create: Tells Codemagic to create the necessary files in Apple Developer Portal if they don't exist
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --type IOS_APP_STORE \
             --create
           
           # Fetch macOS App Store Distribution files (certificate and provisioning profile)
-          # --platform MAC_OS: Essential to specify macOS for macOS signing files
-          # --type MAC_APP_STORE: Specifies that it's for Mac App Store distribution
           app-store-connect fetch-signing-files "${IOS_BUNDLE_ID}" \
             --platform MAC_OS \
             --type MAC_APP_STORE \
@@ -88,9 +83,6 @@ workflows:
       - name: Build iOS App (IPA)
         script: |
           # Build the iOS application package (IPA) for release.
-          # --release: Builds a release version.
-          # --obfuscate, --split-debug-info: For code obfuscation and debug info separation (improves security/reduces size).
-          # --bundle-id: Explicitly sets the bundle ID for the build (good practice for `ipa` builds).
           flutter build ipa --release \
             --obfuscate --split-debug-info=./debug_info \
             --bundle-id "${IOS_BUNDLE_ID}"
@@ -98,9 +90,6 @@ workflows:
       - name: Build macOS App
         script: |
           # Build the macOS application bundle for release.
-          # --release: Builds a release version.
-          # --obfuscate, --split-debug-info: For code obfuscation and debug info separation.
-          # --target-platform macos-x64: Targets Intel macOS. Remove if you want a universal binary by default on M1/M2.
           flutter build macos --release \
             --obfuscate --split-debug-info=./debug_info \
             --target-platform macos-x64
@@ -108,40 +97,24 @@ workflows:
     # --- Artifacts ---
     # Specifies which files to save as build artifacts after the workflow completes.
     artifacts:
-      - build/ios/Runner.ipa # The generated iOS App Store / TestFlight distributable
-      - build/macos/Build/Products/Release/*.app.zip # The macOS app bundle, zipped for download
+      - build/ios/Runner.ipa
+      - build/macos/Build/Products/Release/*.app.zip
 
     # --- Publishing ---
     # Configures post-build actions, such as email notifications and App Store Connect uploads.
     publishing:
       email:
         recipients:
-          - pegumaxinc@gmail.com # Replace with your actual email address
+          - pegumaxinc@gmail.com
         notify:
-          success: true # Notify on successful builds
-          failure: true # Notify on failed builds
+          success: true
+          failure: true
 
       # --- App Store Connect Publishing (for iOS) ---
-      # This block uploads the generated iOS IPA to App Store Connect.
       app_store_connect:
-        auth: integration # Instructs Codemagic to use the App Store Connect API Key linked via 'integrations'
-        # To automatically submit to TestFlight after upload, uncomment the line below:
+        auth: integration
         # submit_to_testflight: true
-        # To manage build numbers:
-        # build_number:
-        #   source: codemagic # Codemagic assigns a unique build number
-        # version_number:
-        #   source: project # Uses version from pubspec.yaml and Info.plist
-        # To automatically submit to the App Store (after TestFlight testing):
-        # submit_to_app_store: true
-        # release_type: manual # or automatic (manual is safer initially)
 
       # --- macOS App Store Connect Publishing (Advanced - Placeholder) ---
-      # Note: Publishing macOS apps to the Mac App Store is more involved than iOS.
-      # It often requires additional steps like notarization using `notarytool`
-      # and specific `altool` or `app_store_connect` commands for macOS.
-      # The standard `app_store_connect` block primarily handles iOS IPAs.
-      # If you need full macOS App Store automation, you might need dedicated
-      # scripts or a separate publishing configuration specific to macOS artifacts.
-      # For now, this YAML will build the macOS app and save it as an artifact.
-      # You would then manually upload and notarize it via App Store Connect or Xcode.
+      # As noted before, macOS App Store publishing can be more complex due to notarization.
+      # This YAML will build the macOS app, but full automated notarization/upload might require more.
