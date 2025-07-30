@@ -25,7 +25,9 @@ workflows:
     # This section links your workflow to the App Store Connect API Key configured in Codemagic UI.
     # It tells Codemagic which key to use for fetching signing files and publishing.
     integrations:
-      app_store_connect: "Codemagic New Signing Key" # <--- UPDATED: Using the new key name
+      # !! IMPORTANT: Make sure "Codemagic New Signing Key" below EXACTLY matches the name
+      # of your App Store Connect API Key configured in Codemagic Integrations (the one with Developer role).
+      app_store_connect: "Codemagic New Signing Key" 
 
     # --- Triggering ---
     triggering:
@@ -55,8 +57,9 @@ workflows:
           rm -rf ios/Runner.xcworkspace/
           flutter clean
           
-          echo "Running flutter pub get to regenerate Podfile and install pods..."
+          echo "Cleanup complete. Now running flutter pub get to regenerate Podfile and install pods..."
           flutter pub get
+          echo "flutter pub get finished. Now patching Podfile..."
           
           echo "Patching Podfile to set iOS deployment target to 15.0..."
           if grep -q "platform :ios," ios/Podfile; then
@@ -66,11 +69,19 @@ workflows:
           fi
           echo "Verifying Podfile content after patch:"
           cat ios/Podfile | grep "platform :ios"
+          echo "Podfile patching complete."
 
       - name: Fetch iOS signing files and get profile UUID/Cert Name
         script: |
           echo "Using Main App Bundle ID for signing: ${IOS_BUNDLE_ID}"
           echo "Using Test Target Bundle ID for signing: ${IOS_BUNDLE_ID}.RunnerTests" 
+
+          echo "--- Diagnostic: Listing Certificates with the new API Key ---"
+          # This command will attempt to list your distribution certificates using the configured API key.
+          # If this fails, it means the API Key connection itself is the issue.
+          # !! IMPORTANT: Replace 'YOUR_APPLE_TEAM_ID' with your actual 10-character Apple Developer Team ID.
+          app-store-connect list-certificates --type IOS_DISTRIBUTION --team-id 26499NZDJJ 
+          echo "--- End Diagnostic ---"
 
           # Fetch iOS App Store Distribution files for the main app (for release)
           # This command saves the profiles to a standard location.
@@ -116,14 +127,14 @@ workflows:
 
           # Extract the UUID from the .mobileprovision file using security cms
           APP_STORE_PROFILE_UUID=$(security cms -D -i "$APP_STORE_PROFILE_PATH" | grep UUID -A 1 | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')
-          
+
           if [ -z "$APP_STORE_PROFILE_UUID" ]; then
             echo "Error: Could not extract UUID from profile file: $APP_STORE_PROFILE_PATH"
             security cms -D -i "$APP_STORE_PROFILE_PATH" # Print content for debugging
             exit 1
           fi
           echo "Extracted App Store Profile UUID: $APP_STORE_PROFILE_UUID"
-          
+
           # Get the exact name of the iOS Distribution certificate.
           # This assumes you have one 'Apple Distribution' certificate available.
           IOS_DISTRIBUTION_CERT_NAME=$(security find-identity -p codesigning -v | grep "Apple Distribution" | head -1 | sed -E 's/.*"(Apple Distribution: .*)"/\1/')
@@ -215,3 +226,4 @@ workflows:
         # To automatically submit to the App Store (after TestFlight testing):
         # submit_to_app_store: true
         # release_type: manual # or automatic (manual is safer initially)
+        
