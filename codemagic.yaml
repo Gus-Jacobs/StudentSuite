@@ -15,14 +15,14 @@ workflows:
     # IMPORTANT: Ensure IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are set in
     # Codemagic UI Environment Variables, and that your "variables" group is linked.
     environment:
-      flutter: stable       # Specifies the Flutter channel to use
-      xcode: latest         # Uses the latest available Xcode version on Codemagic
-      cocoapods: default    # Uses the default CocoaPods version
+      flutter: stable         # Specifies the Flutter channel to use
+      xcode: latest           # Uses the latest available Xcode version on Codemagic
+      cocoapods: default      # Uses the default CocoaPods version
 
       # Link the variable group where IOS_BUNDLE_ID and CERTIFICATE_PRIVATE_KEY are stored
       # This MUST match the name of your Variable Group in Codemagic UI.
       groups:
-        - variables 
+        - variables
 
       # Firebase Environment Variables (if your app uses Firebase)
       # If these are also in your "variables" group, they will be loaded.
@@ -54,15 +54,48 @@ workflows:
           flutter upgrade
           flutter doctor
 
-      - name: Get dependencies
+      - name: Clean and Regenerate iOS Podfile
         script: |
-          flutter pub get
+          echo "Starting aggressive iOS build artifact cleanup..."
+          # Ensure we are at the root of the Flutter project
+          cd $CM_BUILD_DIR # Codemagic sets $CM_BUILD_DIR to the cloned repo root
 
-      - name: Install iOS Pods
+          # Remove all potentially problematic iOS build artifacts
+          rm -rf ios/Pods/
+          rm -f ios/Podfile
+          rm -f ios/Podfile.lock
+          rm -rf ios/.symlinks/
+          rm -rf ios/Runner.xcworkspace/
+          flutter clean
+          
+          echo "Running flutter pub get to regenerate Podfile and install pods..."
+          flutter pub get
+          
+          echo "Patching Podfile to set iOS deployment target to 15.0..."
+          # This sed command is for macOS (due to -i '').
+          # It first tries to uncomment and set the version if the line exists.
+          # Then, it tries to insert the line if it's completely missing after a known comment.
+          if grep -q "platform :ios," ios/Podfile; then
+              sed -i '' "s/^#* *platform :ios, '\(.*\)'/platform :ios, '15.0'/" ios/Podfile
+          else
+              # Fallback: if 'platform :ios' line is completely missing, insert it
+              # This command finds the standard "Uncomment this line..." comment and inserts the platform line after it.
+              sed -i '' "/# Uncomment this line to define a global platform for your project/a\platform :ios, '15.0'" ios/Podfile
+          fi
+          
+          echo "Verifying Podfile content after patch:"
+          cat ios/Podfile | grep "platform :ios" # Just to show the line in logs
+
+
+      # The separate 'Install iOS Pods' step is now redundant because 'flutter pub get' handles it.
+      # You can remove it or keep it for clarity, but it won't do much after 'flutter pub get'.
+      # Keeping it for now as it was explicitly in your original file
+      - name: Install iOS Pods (redundant after pub get, but kept for original structure)
         script: |
           cd ios
-          pod install
+          pod install # This will effectively be a no-op if flutter pub get already ran it
           cd ..
+
 
       - name: Fetch iOS signing files
         script: |
@@ -85,10 +118,16 @@ workflows:
 
       - name: Build iOS App (IPA)
         script: |
+          echo "Starting iOS IPA build..."
           # Build the iOS application package (IPA) for release.
           # The bundle ID is configured in your Xcode project's files (e.g., project.pbxproj).
           flutter build ipa --release \
-            --obfuscate --split-debug-info=./debug_info
+            --obfuscate --split-debug-info=./debug_info \
+            --archive-xcargs="-allowProvisioningUpdates CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=26499NZDJJ" # Use your actual Team ID
+            # IMPORTANT: Replace '26499NZDJJ' with your actual 10-character Apple Developer Team ID
+            # You can find this in your Apple Developer account under 'Membership' or in Xcode.
+            # If you have flavors (e.g., --flavor production), add it before the backslash.
+            # Example: --flavor production \
 
       # The 'Build macOS App' step has been removed.
 
@@ -115,7 +154,6 @@ workflows:
         # To automatically submit to TestFlight after upload, uncomment the line below:
         # submit_to_testflight: true
         # To manage build numbers:
-        # build_number:
         #   source: codemagic # Codemagic assigns a unique build number
         # version_number:
         #   source: project # Uses version from pubspec.yaml and Info.plist
