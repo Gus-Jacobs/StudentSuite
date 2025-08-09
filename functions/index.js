@@ -4,12 +4,18 @@ const admin = require("firebase-admin");
 const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {OpenAI} = require("openai");
 const axios = require("axios");
+const {URLSearchParams} = require("url");
 
 // Initialize Firebase Admin SDK ONCE at the top level of your script.
 admin.initializeApp();
 
 // Your email address where you want to receive the feedback.
 const ADMIN_EMAIL = "pegumaxinc@gmail.com";
+
+// IAP Verification endpoint URLs
+const APPLE_VERIFICATION_URL = "https://buy.itunes.apple.com/verifyReceipt";
+const APPLE_SANDBOX_VERIFICATION_URL = "https://sandbox.itunes.apple.com/verifyReceipt";
+const GOOGLE_VERIFICATION_URL = "https://www.googleapis.com/androidpublisher/v3/applications";
 
 /**
  * Creates a Stripe Checkout session with the user's email and redirects
@@ -183,6 +189,95 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
 });
 
 /**
+ * Callable function to validate an IAP receipt and update user subscription status.
+ * @param {object} data The data passed to the function.
+ * @param {string} data.platform 'ios' or 'android'.
+ * @param {string} data.receiptData The receipt string.
+ * @returns {Promise<{isSubscribed: boolean}>} The subscription status.
+ */
+exports.processIAPReceipt = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated.",
+    );
+  }
+  const userId = context.auth.uid;
+  const {platform, receiptData, isSandbox} = data;
+
+  if (!platform || !receiptData) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "platform and receiptData must be provided.",
+    );
+  }
+
+  try {
+    let isSubscribed = false;
+
+    if (platform === "ios") {
+      const url = isSandbox ? APPLE_SANDBOX_VERIFICATION_URL : APPLE_VERIFICATION_URL;
+      const response = await axios.post(url, {
+        "receipt-data": receiptData,
+        "password": functions.config().apple?.shared_secret,
+      });
+
+      if (response.data.status === 0 && response.data.latest_receipt_info) {
+        const latestReceiptInfo = response.data.latest_receipt_info.sort((a, b) => b.expires_date_ms - a.expires_date_ms)[0];
+        const expiresDate = new Date(parseInt(latestReceiptInfo.expires_date_ms));
+        const now = new Date();
+
+        if (expiresDate > now) {
+          isSubscribed = true;
+          await admin.firestore().collection("users").doc(userId).set({
+            iapRole: "pro",
+            iapSubscriptionId: latestReceiptInfo.original_transaction_id,
+            iapExpiryDate: expiresDate,
+          }, {merge: true});
+        } else {
+          await admin.firestore().collection("users").doc(userId).set({
+            iapRole: "free",
+          }, {merge: true});
+        }
+      }
+    } else if (platform === "android") {
+      const {subscriptionId, purchaseToken} = receiptData;
+      const url = `${GOOGLE_VERIFICATION_URL}/${functions.config().google_iap.package_name}/subscriptions/${subscriptionId}/purchases/${purchaseToken}?access_token=${functions.config().google_iap.access_token}`;
+
+      const response = await axios.get(url);
+      const expiryTimeMillis = response.data.expiryTimeMillis;
+
+      if (expiryTimeMillis && new Date(parseInt(expiryTimeMillis)) > new Date()) {
+        isSubscribed = true;
+        await admin.firestore().collection("users").doc(userId).set({
+          iapRole: "pro",
+          iapSubscriptionId: subscriptionId,
+          iapExpiryDate: new Date(parseInt(expiryTimeMillis)),
+        }, {merge: true});
+      } else {
+        await admin.firestore().collection("users").doc(userId).set({
+          iapRole: "free",
+        }, {merge: true});
+      }
+    }
+
+    // Now, update the custom claims based on combined status
+    const userDoc = await admin.firestore().collection("users").doc(userId).get();
+    const isPro = userDoc.data()?.stripeRole === "pro" || userDoc.data()?.iapRole === "pro";
+    await admin.auth().setCustomUserClaims(userId, {isPro: isPro});
+
+    console.log(`IAP validation for user ${userId} successful. Is subscribed: ${isSubscribed}`);
+    return {isSubscribed: isSubscribed};
+  } catch (error) {
+    console.error("IAP Receipt Verification Error:", error.message);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to verify receipt.",
+    );
+  }
+});
+
+/**
  * Updates the user's custom claim and Firestore document based on their
  * Stripe subscription status.
  * @param {string} stripeCustomerId The Stripe Customer ID.
@@ -199,16 +294,17 @@ async function updateUserRole(stripeCustomerId, status) {
 
   const userDoc = usersQuery.docs[0];
   const userId = userDoc.id;
-  const role = status === "active" ? "pro" : "free";
+  const stripeRole = status === "active" ? "pro" : "free";
 
   try {
     // Update Firestore document
-    await userDoc.ref.update({stripeRole: role});
+    await userDoc.ref.update({stripeRole: stripeRole});
 
-    // Update Firebase Auth custom claims (optional but good for security rules)
-    await admin.auth().setCustomUserClaims(userId, {stripeRole: role});
+    // Update Firebase Auth custom claims based on combined status
+    const isPro = stripeRole === "pro" || userDoc.data()?.iapRole === "pro";
+    await admin.auth().setCustomUserClaims(userId, {isPro: isPro});
 
-    console.log(`Successfully set role to '${role}' for user ${userId}`);
+    console.log(`Successfully set Stripe role to '${stripeRole}' for user ${userId}`);
     return userDoc; // Return the document for further processing
   } catch (error) {
     console.error("Failed to update user role:", error);
