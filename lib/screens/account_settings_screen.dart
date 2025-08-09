@@ -1,3 +1,4 @@
+// The full, updated AccountSettingsScreen.dart file
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -340,6 +341,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     final passwordController = TextEditingController();
     final formKey = GlobalKey<FormState>();
     final auth = Provider.of<AuthProvider>(context, listen: false);
+    final subscription = Provider.of<SubscriptionProvider>(context, listen: false);
 
     showDialog(
       context: context,
@@ -395,17 +397,20 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                   ),
                   onPressed: () async {
                     if (formKey.currentState?.validate() ?? false) {
-                      // Get navigator and messenger references before the async gap.
                       final navigator = Navigator.of(context);
                       final messenger = ScaffoldMessenger.of(context);
 
                       try {
+                        // First, handle subscription cancellation
+                        if (subscription.isSubscribed) {
+                           await subscription.cancelSubscription();
+                        }
+
+                        // Then, delete the user's account
                         await auth.deleteAccount(
                           passwordController.text.trim(),
                         );
 
-                        // The auth state listener will handle state changes, but we
-                        // navigate manually to ensure a clean exit.
                         navigator.pushNamedAndRemoveUntil(
                             '/login', (route) => false);
 
@@ -414,7 +419,6 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                               content: Text('Account deleted successfully.')),
                         );
                       } catch (e) {
-                        // The dialog is still on screen if it fails, so we can pop it.
                         Navigator.of(ctx).pop();
                         messenger.showSnackBar(
                           SnackBar(
