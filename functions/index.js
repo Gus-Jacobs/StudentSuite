@@ -5,6 +5,11 @@ const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {OpenAI} = require("openai");
 const axios = require("axios");
 const {URLSearchParams} = require("url");
+const jwt = require("jsonwebtoken"); // New library for Apple API communication
+const {
+  AppStoreServerAPI,
+  Environment,
+} = require("@apple/app-store-server-library");
 
 // Initialize Firebase Admin SDK ONCE at the top level of your script.
 admin.initializeApp();
@@ -16,6 +21,21 @@ const ADMIN_EMAIL = "pegumaxinc@gmail.com";
 const APPLE_VERIFICATION_URL = "https://buy.itunes.apple.com/verifyReceipt";
 const APPLE_SANDBOX_VERIFICATION_URL = "https://sandbox.itunes.apple.com/verifyReceipt";
 const GOOGLE_VERIFICATION_URL = "https://www.googleapis.com/androidpublisher/v3/applications";
+
+// --- Apple IAP API Configuration ---
+// These are placeholders for the environment variables you must set.
+// This ensures your private key is not hardcoded and is securely stored.
+const APPLE_KEY_ID = functions.config().apple_iap?.key_id;
+const APPLE_ISSUER_ID = functions.config().apple_iap?.issuer_id;
+const APPLE_PRIVATE_KEY = functions.config().apple_iap?.private_key;
+
+const appStoreClient = new AppStoreServerAPI(
+    APPLE_PRIVATE_KEY,
+    APPLE_KEY_ID,
+    APPLE_ISSUER_ID,
+    Environment.Sandbox, // Use Environment.Production for production
+);
+
 
 /**
  * Creates a Stripe Checkout session with the user's email and redirects
@@ -178,7 +198,6 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             }
           }
         }
-        // --- End Referral Logic ---
       }
       break;
     default:
@@ -468,6 +487,129 @@ exports.validateReferralCode = functions.https.onCall(async (data, context) => {
 });
 
 /**
+ * A new callable function to handle referral code redemption logic for IAP.
+ * @param {object} data The data passed to the function.
+ * @param {string} data.referrerId The UID of the user who referred the new subscriber.
+ * @returns {Promise<{success: boolean}>}
+ */
+exports.rewardReferrer = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated.",
+    );
+  }
+  const userId = context.auth.uid; // This is the new subscriber
+  const {referrerId} = data;
+
+  if (!referrerId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "The function must be called with a 'referrerId'.",
+    );
+  }
+
+  try {
+    const referrerDocRef = admin.firestore().collection("users").doc(referrerId);
+    const newSubscriberDocRef = admin.firestore().collection("users").doc(userId);
+
+    // Track the referral in Firestore for both users
+    await admin.firestore().runTransaction(async (transaction) => {
+      const referrerDoc = await transaction.get(referrerDocRef);
+      const newSubscriberDoc = await transaction.get(newSubscriberDocRef);
+
+      if (!referrerDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Referrer not found.");
+      }
+
+      // Check if this referral has already been processed for this user
+      if (newSubscriberDoc.data().referralCreditGiven) {
+        return; // Exit if already processed
+      }
+
+      const referrerData = referrerDoc.data();
+      const referralCount = (referrerData.referralCount || 0) + 1;
+
+      // Update the referrer's document
+      transaction.update(referrerDocRef, {
+        referralCount: referralCount,
+        lastReferralDate: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update the new subscriber's document
+      transaction.update(newSubscriberDocRef, {
+        referredBy: referrerId,
+        referralCreditGiven: true,
+      });
+
+      // TODO: You would now generate a new Offer Code for the referrer
+      // or simply track their earned free months. This is a separate
+      // integration with the App Store Server API that can be built out
+      // here. For now, we are just tracking the count.
+      console.log(`Referral from ${userId} to ${referrerId} successfully tracked.`);
+    });
+
+    return {success: true};
+  } catch (error) {
+    console.error("Error processing IAP referral:", error);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to process referral.",
+    );
+  }
+});
+
+/**
+ * A new callable function to get a promotional offer signature from Apple.
+ * @param {object} data The data passed to the function.
+ * @param {string} data.productIdentifier The product ID of the subscription.
+ * @param {string} data.offerIdentifier The promotional offer ID.
+ * @returns {Promise<{signature: string, nonce: string, timestamp: number, keyId: string}>}
+ */
+exports.getPromotionalOfferSignature = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated.",
+    );
+  }
+  const userId = context.auth.uid;
+  const {productIdentifier, offerIdentifier} = data;
+
+  if (!productIdentifier || !offerIdentifier) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "productIdentifier and offerIdentifier must be provided.",
+    );
+  }
+
+  // Generate a random nonce and current timestamp for the signature.
+  const nonce = require("crypto").randomBytes(16).toString("hex");
+  const timestamp = Date.now();
+  const token = jwt.sign(
+      {
+        nonce: nonce,
+        timestamp: timestamp,
+        productIdentifier: productIdentifier,
+        offerIdentifier: offerIdentifier,
+      },
+      APPLE_PRIVATE_KEY,
+      {
+        algorithm: "ES256",
+        keyid: APPLE_KEY_ID,
+        issuer: APPLE_ISSUER_ID,
+      },
+  );
+
+  return {
+    signature: token,
+    nonce: nonce,
+    timestamp: timestamp,
+    keyId: APPLE_KEY_ID,
+  };
+});
+
+/**
  * Sends a monthly report summarizing AI usage and user statistics.
  * This function is scheduled to run at 9:00 AM on the 1st day of every month.
  */
@@ -519,16 +661,16 @@ exports.monthlyReport = functions.pubsub.schedule("0 9 1 * *")
         to: ADMIN_EMAIL,
         subject: `Student Suite Monthly Report for ${monthYear}`,
         html: `<h1>Student Suite Report: ${monthYear}</h1>
-                       <p><b>Total Users:</b> ${totalUsers}</p>
-                       <p><b>Active AI Users:</b> ${activeUsers}</p>
-                       <hr>
-                       <p><b>Total AI Requests:</b> ${totalRequests.toLocaleString()}</p>
-                       <p><b>Total AI Cost:</b> $${totalCost.toFixed(4)}</p>
-                       <p><b>Total Input Tokens:</b> ${totalInputTokens.toLocaleString()}</p>
-                       <p><b>Total Output Tokens:</b> ${totalOutputTokens.toLocaleString()}</p>
-                       <hr>
-                       <p><b>Average Requests per Active User:</b> ${avgRequests}</p>
-                       <p><b>Average Cost per Active User:</b> $${avgCost}</p>`,
+                      <p><b>Total Users:</b> ${totalUsers}</p>
+                      <p><b>Active AI Users:</b> ${activeUsers}</p>
+                      <hr>
+                      <p><b>Total AI Requests:</b> ${totalRequests.toLocaleString()}</p>
+                      <p><b>Total AI Cost:</b> $${totalCost.toFixed(4)}</p>
+                      <p><b>Total Input Tokens:</b> ${totalInputTokens.toLocaleString()}</p>
+                      <p><b>Total Output Tokens:</b> ${totalOutputTokens.toLocaleString()}</p>
+                      <hr>
+                      <p><b>Average Requests per Active User:</b> ${avgRequests}</p>
+                      <p><b>Average Cost per Active User:</b> $${avgCost}</p>`,
       };
 
       try {
