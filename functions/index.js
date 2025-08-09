@@ -1,7 +1,9 @@
+// The full, updated index.js file
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {OpenAI} = require("openai");
+const axios = require("axios");
 
 // Initialize Firebase Admin SDK ONCE at the top level of your script.
 admin.initializeApp();
@@ -86,7 +88,6 @@ exports.createStripePortalLink = functions.firestore
         await snap.ref.set({error: {message: error.message}}, {merge: true});
       }
     });
-
 
 /**
  * A webhook that listens for events from Stripe and updates the user's
@@ -259,6 +260,39 @@ exports.sendFeedbackEmail = functions.firestore
     });
 
 /**
+ * A new Cloud Function to handle user-initiated subscription cancellation for Stripe.
+ * Listens for a new document in the 'stripe_commands' subcollection.
+ */
+exports.cancelStripeSubscription = functions.firestore
+    .document("users/{userId}/stripe_commands/{commandId}")
+    .onCreate(async (snap, context) => {
+      const command = snap.data();
+      const userId = context.params.userId;
+      const stripe = require("stripe")(functions.config().stripe.secret);
+
+      if (command.command === "cancel_subscription") {
+        console.log(`Attempting to cancel Stripe subscription for user: ${userId}`);
+
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+        const customerId = userDoc.data()?.stripeCustomerId;
+        const stripeSubscriptionId = userDoc.data()?.stripeSubscriptionId;
+
+        if (!customerId || !stripeSubscriptionId) {
+          console.error(`User ${userId} has no Stripe Customer ID or Subscription ID.`);
+          return null;
+        }
+
+        try {
+          await stripe.subscriptions.cancel(stripeSubscriptionId);
+          console.log(`Successfully cancelled Stripe subscription for user: ${userId}`);
+        } catch (error) {
+          console.error(`Error cancelling Stripe subscription for user ${userId}:`, error);
+        }
+      }
+      return null;
+    });
+
+/**
  * Cleans up user data from Firestore and Storage when a user is deleted from
  * Firebase Authentication.
  */
@@ -268,10 +302,30 @@ exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
 
   const firestore = admin.firestore();
   const storage = admin.storage().bucket();
+  const stripe = require("stripe")(functions.config().stripe.secret);
 
-  // 1. Recursively delete the user's document and all subcollections
-  // (e.g., checkout_sessions, portal_links, aiUsage) from Firestore.
+  // 1. Attempt to cancel Stripe subscription before deleting data
   const userDocRef = firestore.collection("users").doc(userId);
+  try {
+    const userDoc = await userDocRef.get();
+    const customerId = userDoc.data()?.stripeCustomerId;
+    const stripeSubscriptionId = userDoc.data()?.stripeSubscriptionId;
+
+    if (customerId && stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(stripeSubscriptionId);
+        console.log(`Successfully cancelled Stripe subscription for user: ${userId}`);
+      } catch (error) {
+        console.error(`Error cancelling Stripe subscription for deleted user ${userId}:`, error);
+        // Do not throw an error here; continue with cleanup
+      }
+    }
+  } catch (error) {
+    console.error(`Error retrieving user data for subscription cancellation of ${userId}:`, error);
+  }
+
+  // 2. Recursively delete the user's document and all subcollections
+  // (e.g., checkout_sessions, portal_links, aiUsage) from Firestore.
   try {
     await firestore.recursiveDelete(userDocRef);
     console.log(`Successfully deleted Firestore data for user: ${userId}`);
@@ -279,7 +333,7 @@ exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
     console.error(`Error deleting Firestore data for user ${userId}:`, error);
   }
 
-  // 2. Delete the user's profile picture from Firebase Storage.
+  // 3. Delete the user's profile picture from Firebase Storage.
   const profilePicRef = storage.file(`profile_pics/${userId}`);
   try {
     await profilePicRef.delete();
@@ -369,16 +423,16 @@ exports.monthlyReport = functions.pubsub.schedule("0 9 1 * *")
         to: ADMIN_EMAIL,
         subject: `Student Suite Monthly Report for ${monthYear}`,
         html: `<h1>Student Suite Report: ${monthYear}</h1>
-               <p><b>Total Users:</b> ${totalUsers}</p>
-               <p><b>Active AI Users:</b> ${activeUsers}</p>
-               <hr>
-               <p><b>Total AI Requests:</b> ${totalRequests.toLocaleString()}</p>
-               <p><b>Total AI Cost:</b> $${totalCost.toFixed(4)}</p>
-               <p><b>Total Input Tokens:</b> ${totalInputTokens.toLocaleString()}</p>
-               <p><b>Total Output Tokens:</b> ${totalOutputTokens.toLocaleString()}</p>
-               <hr>
-               <p><b>Average Requests per Active User:</b> ${avgRequests}</p>
-               <p><b>Average Cost per Active User:</b> $${avgCost}</p>`,
+                       <p><b>Total Users:</b> ${totalUsers}</p>
+                       <p><b>Active AI Users:</b> ${activeUsers}</p>
+                       <hr>
+                       <p><b>Total AI Requests:</b> ${totalRequests.toLocaleString()}</p>
+                       <p><b>Total AI Cost:</b> $${totalCost.toFixed(4)}</p>
+                       <p><b>Total Input Tokens:</b> ${totalInputTokens.toLocaleString()}</p>
+                       <p><b>Total Output Tokens:</b> ${totalOutputTokens.toLocaleString()}</p>
+                       <hr>
+                       <p><b>Average Requests per Active User:</b> ${avgRequests}</p>
+                       <p><b>Average Cost per Active User:</b> $${avgCost}</p>`,
       };
 
       try {
