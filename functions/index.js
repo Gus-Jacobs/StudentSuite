@@ -1,4 +1,4 @@
-// The full, updated index.js file
+// The full, corrected index.js file
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {GoogleGenerativeAI} = require("@google/generative-ai");
@@ -6,10 +6,7 @@ const {OpenAI} = require("openai");
 const axios = require("axios");
 const {URLSearchParams} = require("url");
 const jwt = require("jsonwebtoken"); // New library for Apple API communication
-const {
-  AppStoreServerAPI,
-  Environment,
-} = require("@apple/app-store-server-library");
+const {AppStoreServerAPI, Environment} = require("@apple/app-store-server-library");
 
 // Initialize Firebase Admin SDK ONCE at the top level of your script.
 admin.initializeApp();
