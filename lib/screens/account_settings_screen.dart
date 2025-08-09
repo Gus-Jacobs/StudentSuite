@@ -1,4 +1,5 @@
 // The full, updated AccountSettingsScreen.dart file
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -68,8 +69,8 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
             GlassInfoTile(
               icon: Icons.star_border_outlined,
               title: 'Subscription Tier',
-              subtitle: subscription.isSubscribed ? 'Pro' : 'Free',
-              trailing: subscription.isSubscribed
+              subtitle: subscription.isPro ? 'Pro' : 'Free',
+              trailing: subscription.isPro
                   ? ElevatedButton(
                       onPressed: () async {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -77,13 +78,25 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                               content:
                                   Text('Redirecting to customer portal...')),
                         );
-                        await subscription.launchCustomerPortal();
+                        if (Platform.isIOS || Platform.isAndroid) {
+                          // For IAP, launch the native subscription management page
+                          await subscription.cancelSubscription();
+                        } else {
+                          // For Stripe, launch the Stripe customer portal
+                          await subscription.launchCustomerPortal();
+                        }
                       },
                       child: const Text('Manage'),
                     )
                   : ElevatedButton(
                       onPressed: () {
-                        subscription.launchCheckoutSession();
+                        if (Platform.isIOS || Platform.isAndroid) {
+                          // For IAP, initiate the in-app purchase flow
+                          subscription.purchaseIAPSubscription();
+                        } else {
+                          // For Stripe, launch the checkout session
+                          subscription.launchCheckoutSession();
+                        }
                       },
                       child: const Text('Upgrade'),
                     ),
@@ -402,7 +415,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
 
                       try {
                         // First, handle subscription cancellation
-                        if (subscription.isSubscribed) {
+                        if (subscription.isPro) {
                            await subscription.cancelSubscription();
                         }
 
