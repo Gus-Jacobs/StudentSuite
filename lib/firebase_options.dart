@@ -60,11 +60,11 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDu-I7ym-Y0IFlRaOb-F-h7JxC1otoQ_2k',
-    appId: '1:749555197585:ios:d21f45b8ce7fab54218130',
+    appId: '1:749555197585:ios:5c8ebdf94e079402218130',
     messagingSenderId: '749555197585',
     projectId: 'student-suite-9ae1d',
     storageBucket: 'student-suite-9ae1d.firebasestorage.app',
-    iosBundleId: 'com.example.studentSuite',
+    iosBundleId: 'com.pegumax.studentsuite',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(

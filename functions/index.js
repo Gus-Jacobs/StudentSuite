@@ -1,7 +1,19 @@
+// EDIT_NUMBER: 1.0.8
+
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {OpenAI} = require("openai");
+const axios = require("axios");
+const jwt = require("jsonwebtoken");
+const { AppStoreServerAPIClient, Environment } = require("@apple/app-store-server-library");
+
+// v2 imports
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {onCall, onRequest} = require("firebase-functions/v2/https");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
+const {auth} = require("firebase-functions/v1");
+
 
 // Initialize Firebase Admin SDK ONCE at the top level of your script.
 admin.initializeApp();
@@ -9,15 +21,22 @@ admin.initializeApp();
 // Your email address where you want to receive the feedback.
 const ADMIN_EMAIL = "pegumaxinc@gmail.com";
 
+// IAP Verification endpoint URLs
+const APPLE_VERIFICATION_URL = "https://buy.itunes.apple.com/verifyReceipt";
+const APPLE_SANDBOX_VERIFICATION_URL = "https://sandbox.itunes.apple.com/verifyReceipt";
+const GOOGLE_VERIFICATION_URL = "https://www.googleapis.com/androidpublisher/v3/applications";
+
+// Apple IAP API client and config will be initialized within the functions that need them.
+
+
 /**
  * Creates a Stripe Checkout session with the user's email and redirects
  * them to the Stripe checkout page.
  */
-exports.createStripeCheckout = functions.firestore
-    .document("users/{userId}/checkout_sessions/{sessionId}")
-    .onCreate(async (snap, context) => {
+exports.createStripeCheckout = onDocumentCreated("users/{userId}/checkout_sessions/{sessionId}", async (event) => {
+      const snap = event.data;
       const {price, success_url, cancel_url} = snap.data();
-      const userId = context.params.userId;
+      const userId = event.params.userId;
       const stripe = require("stripe")(functions.config().stripe.secret);
 
       try {
@@ -59,11 +78,10 @@ exports.createStripeCheckout = functions.firestore
  * Creates a Stripe Customer Portal session to allow users to manage their
  * subscriptions.
  */
-exports.createStripePortalLink = functions.firestore
-    .document("users/{userId}/portal_links/{linkId}")
-    .onCreate(async (snap, context) => {
+exports.createStripePortalLink = onDocumentCreated("users/{userId}/portal_links/{linkId}", async (event) => {
+      const snap = event.data;
       const {return_url} = snap.data();
-      const userId = context.params.userId;
+      const userId = event.params.userId;
       const stripe = require("stripe")(functions.config().stripe.secret);
 
       try {
@@ -87,12 +105,11 @@ exports.createStripePortalLink = functions.firestore
       }
     });
 
-
 /**
  * A webhook that listens for events from Stripe and updates the user's
  * role in Firestore accordingly.
  */
-exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+exports.stripeWebhook = onRequest(async (req, res) => {
   const stripe = require("stripe")(functions.config().stripe.secret);
   const signature = req.headers["stripe-signature"];
   const endpointSecret = functions.config().stripe.webhook_secret;
@@ -171,7 +188,6 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
             }
           }
         }
-        // --- End Referral Logic ---
       }
       break;
     default:
@@ -179,6 +195,97 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
   }
 
   res.status(200).send();
+});
+
+/**
+ * Callable function to validate an IAP receipt and update user subscription status.
+ * @param {object} data The data passed to the function.
+ * @param {string} data.platform 'ios' or 'android'.
+ * @param {string} data.receiptData The receipt string.
+ * @returns {Promise<{isSubscribed: boolean}>} The subscription status.
+ */
+exports.processIAPReceipt = onCall(async (request) => {
+  const {data} = request;
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated.",
+    );
+  }
+  const userId = request.auth.uid;
+  const {platform, receiptData, isSandbox} = data;
+
+  if (!platform || !receiptData) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "platform and receiptData must be provided.",
+    );
+  }
+
+  try {
+    let isSubscribed = false;
+
+    if (platform === "ios") {
+      const url = isSandbox ? APPLE_SANDBOX_VERIFICATION_URL : APPLE_VERIFICATION_URL;
+      const appleSharedSecret = functions.config().apple?.shared_secret;
+      const response = await axios.post(url, {
+        "receipt-data": receiptData,
+        "password": appleSharedSecret,
+      });
+
+      if (response.data.status === 0 && response.data.latest_receipt_info) {
+        const latestReceiptInfo = response.data.latest_receipt_info.sort((a, b) => b.expires_date_ms - a.expires_date_ms)[0];
+        const expiresDate = new Date(parseInt(latestReceiptInfo.expires_date_ms));
+        const now = new Date();
+
+        if (expiresDate > now) {
+          isSubscribed = true;
+          await admin.firestore().collection("users").doc(userId).set({
+            iapRole: "pro",
+            iapSubscriptionId: latestReceiptInfo.original_transaction_id,
+            iapExpiryDate: expiresDate,
+          }, {merge: true});
+        } else {
+          await admin.firestore().collection("users").doc(userId).set({
+            iapRole: "free",
+          }, {merge: true});
+        }
+      }
+    } else if (platform === "android") {
+      const {subscriptionId, purchaseToken} = receiptData;
+      const url = `${GOOGLE_VERIFICATION_URL}/${functions.config().google_iap.package_name}/subscriptions/${subscriptionId}/purchases/${purchaseToken}?access_token=${functions.config().google_iap.access_token}`;
+
+      const response = await axios.get(url);
+      const expiryTimeMillis = response.data.expiryTimeMillis;
+
+      if (expiryTimeMillis && new Date(parseInt(expiryTimeMillis)) > new Date()) {
+        isSubscribed = true;
+        await admin.firestore().collection("users").doc(userId).set({
+          iapRole: "pro",
+          iapSubscriptionId: subscriptionId,
+          iapExpiryDate: new Date(parseInt(expiryTimeMillis)),
+        }, {merge: true});
+      } else {
+        await admin.firestore().collection("users").doc(userId).set({
+          iapRole: "free",
+        }, {merge: true});
+      }
+    }
+
+    // Now, update the custom claims based on combined status
+    const userDoc = await admin.firestore().collection("users").doc(userId).get();
+    const isPro = userDoc.data()?.stripeRole === "pro" || userDoc.data()?.iapRole === "pro";
+    await admin.auth().setCustomUserClaims(userId, {isPro: isPro});
+
+    console.log(`IAP validation for user ${userId} successful. Is subscribed: ${isSubscribed}`);
+    return {isSubscribed: isSubscribed};
+  } catch (error) {
+    console.error("IAP Receipt Verification Error:", error.message);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to verify receipt.",
+    );
+  }
 });
 
 /**
@@ -198,16 +305,17 @@ async function updateUserRole(stripeCustomerId, status) {
 
   const userDoc = usersQuery.docs[0];
   const userId = userDoc.id;
-  const role = status === "active" ? "pro" : "free";
+  const stripeRole = status === "active" ? "pro" : "free";
 
   try {
     // Update Firestore document
-    await userDoc.ref.update({stripeRole: role});
+    await userDoc.ref.update({stripeRole: stripeRole});
 
-    // Update Firebase Auth custom claims (optional but good for security rules)
-    await admin.auth().setCustomUserClaims(userId, {stripeRole: role});
+    // Update Firebase Auth custom claims based on combined status
+    const isPro = stripeRole === "pro" || userDoc.data()?.iapRole === "pro";
+    await admin.auth().setCustomUserClaims(userId, {isPro: isPro});
 
-    console.log(`Successfully set role to '${role}' for user ${userId}`);
+    console.log(`Successfully set Stripe role to '${stripeRole}' for user ${userId}`);
     return userDoc; // Return the document for further processing
   } catch (error) {
     console.error("Failed to update user role:", error);
@@ -218,9 +326,8 @@ async function updateUserRole(stripeCustomerId, status) {
 /**
  * Listens for new documents in the 'feedback' collection and sends an email.
  */
-exports.sendFeedbackEmail = functions.firestore
-    .document("feedback/{feedbackId}")
-    .onCreate(async (snap, context) => {
+exports.sendFeedbackEmail = onDocumentCreated("feedback/{feedbackId}", async (event) => {
+      const snap = event.data;
       const nodemailer = require("nodemailer");
       // Lazily initialize mail transport inside the function to avoid deployment timeouts.
       const mailTransport = nodemailer.createTransport({
@@ -252,26 +359,78 @@ exports.sendFeedbackEmail = functions.firestore
 
       try {
         await mailTransport.sendMail(mailOptions);
-        console.log("Feedback email sent successfully for:", context.params.feedbackId);
+        console.log("Feedback email sent successfully for:", event.params.feedbackId);
       } catch (error) {
         console.error("There was an error while sending the feedback email:", error);
       }
     });
 
 /**
+ * A new Cloud Function to handle user-initiated subscription cancellation for Stripe.
+ * Listens for a new document in the 'stripe_commands' subcollection.
+ */
+exports.cancelStripeSubscription = onDocumentCreated("users/{userId}/stripe_commands/{commandId}", async (event) => {
+      const snap = event.data;
+      const command = snap.data();
+      const {userId} = event.params;
+      const stripe = require("stripe")(functions.config().stripe.secret);
+
+      if (command.command === "cancel_subscription") {
+        console.log(`Attempting to cancel Stripe subscription for user: ${userId}`);
+
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+        const customerId = userDoc.data()?.stripeCustomerId;
+        const stripeSubscriptionId = userDoc.data()?.stripeSubscriptionId;
+
+        if (!customerId || !stripeSubscriptionId) {
+          console.error(`User ${userId} has no Stripe Customer ID or Subscription ID.`);
+          return null;
+        }
+
+        try {
+          await stripe.subscriptions.cancel(stripeSubscriptionId);
+          console.log(`Successfully cancelled Stripe subscription for user: ${userId}`);
+        } catch (error) {
+          console.error(`Error cancelling Stripe subscription for user ${userId}:`, error);
+        }
+      }
+      return null;
+    });
+
+/**
  * Cleans up user data from Firestore and Storage when a user is deleted from
  * Firebase Authentication.
  */
-exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
+exports.onUserDeleted = auth.user().onDelete(async (user) => {
   const userId = user.uid;
   console.log(`Starting cleanup for deleted user: ${userId}`);
 
   const firestore = admin.firestore();
   const storage = admin.storage().bucket();
+  const stripe = require("stripe")(functions.config().stripe.secret);
 
-  // 1. Recursively delete the user's document and all subcollections
-  // (e.g., checkout_sessions, portal_links, aiUsage) from Firestore.
+  // 1. Attempt to cancel Stripe subscription before deleting data
   const userDocRef = firestore.collection("users").doc(userId);
+  try {
+    const userDoc = await userDocRef.get();
+    const customerId = userDoc.data()?.stripeCustomerId;
+    const stripeSubscriptionId = userDoc.data()?.stripeSubscriptionId;
+
+    if (customerId && stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(stripeSubscriptionId);
+        console.log(`Successfully cancelled Stripe subscription for user: ${userId}`);
+      } catch (error) {
+        console.error(`Error cancelling Stripe subscription for deleted user ${userId}:`, error);
+        // Do not throw an error here; continue with cleanup
+      }
+    }
+  } catch (error) {
+    console.error(`Error retrieving user data for subscription cancellation of ${userId}:`, error);
+  }
+
+  // 2. Recursively delete the user's document and all subcollections
+  // (e.g., checkout_sessions, portal_links, aiUsage) from Firestore.
   try {
     await firestore.recursiveDelete(userDocRef);
     console.log(`Successfully deleted Firestore data for user: ${userId}`);
@@ -279,7 +438,7 @@ exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
     console.error(`Error deleting Firestore data for user ${userId}:`, error);
   }
 
-  // 2. Delete the user's profile picture from Firebase Storage.
+  // 3. Delete the user's profile picture from Firebase Storage.
   const profilePicRef = storage.file(`profile_pics/${userId}`);
   try {
     await profilePicRef.delete();
@@ -298,7 +457,8 @@ exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
  * @param {string} data.code The referral code to validate.
  * @returns {Promise<{referrerId: string|null}>} The UID of the referrer or null.
  */
-exports.validateReferralCode = functions.https.onCall(async (data, context) => {
+exports.validateReferralCode = onCall(async (request) => {
+  const {data} = request;
   const code = data.code;
   if (!code || typeof code !== "string" || code.length === 0) {
     throw new functions.https.HttpsError(
@@ -318,12 +478,139 @@ exports.validateReferralCode = functions.https.onCall(async (data, context) => {
 });
 
 /**
+ * A new callable function to handle referral code redemption logic for IAP.
+ * @param {object} data The data passed to the function.
+ * @param {string} data.referrerId The UID of the user who referred the new subscriber.
+ * @returns {Promise<{success: boolean}>}
+ */
+exports.rewardReferrer = onCall(async (request) => {
+  const {data} = request;
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated.",
+    );
+  }
+  const userId = request.auth.uid; // This is the new subscriber
+  const {referrerId} = data;
+
+  if (!referrerId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "The function must be called with a 'referrerId'.",
+    );
+  }
+
+  try {
+    const referrerDocRef = admin.firestore().collection("users").doc(referrerId);
+    const newSubscriberDocRef = admin.firestore().collection("users").doc(userId);
+
+    // Track the referral in Firestore for both users
+    await admin.firestore().runTransaction(async (transaction) => {
+      const referrerDoc = await transaction.get(referrerDocRef);
+      const newSubscriberDoc = await transaction.get(newSubscriberDocRef);
+
+      if (!referrerDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Referrer not found.");
+      }
+
+      // Check if this referral has already been processed for this user
+      if (newSubscriberDoc.data().referralCreditGiven) {
+        return; // Exit if already processed
+      }
+
+      const referrerData = referrerDoc.data();
+      const referralCount = (referrerData.referralCount || 0) + 1;
+
+      // Update the referrer's document
+      transaction.update(referrerDocRef, {
+        referralCount: referralCount,
+        lastReferralDate: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update the new subscriber's document
+      transaction.update(newSubscriberDocRef, {
+        referredBy: referrerId,
+        referralCreditGiven: true,
+      });
+
+      // TODO: You would now generate a new Offer Code for the referrer
+      // or simply track their earned free months. This is a separate
+      // integration with the App Store Server API that can be built out
+      // here. For now, we are just tracking the count.
+      console.log(`Referral from ${userId} to ${referrerId} successfully tracked.`);
+    });
+
+    return {success: true};
+  } catch (error) {
+    console.error("Error processing IAP referral:", error);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to process referral.",
+    );
+  }
+});
+
+/**
+ * A new callable function to get a promotional offer signature from Apple.
+ * @param {object} data The data passed to the function.
+ * @param {string} data.productIdentifier The product ID of the subscription.
+ * @param {string} data.offerIdentifier The promotional offer ID.
+ * @returns {Promise<{signature: string, nonce: string, timestamp: number, keyId: string}>}
+ */
+exports.getPromotionalOfferSignature = onCall(async (request) => {
+  const {data} = request;
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The function must be called while authenticated.",
+    );
+  }
+  const userId = request.auth.uid;
+  const {productIdentifier, offerIdentifier} = data;
+
+  if (!productIdentifier || !offerIdentifier) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "productIdentifier and offerIdentifier must be provided.",
+    );
+  }
+
+  const appleKeyId = functions.config().apple_iap?.key_id;
+  const appleIssuerId = functions.config().apple_iap?.issuer_id;
+  const applePrivateKey = functions.config().apple_iap?.private_key;
+
+  // Generate a random nonce and current timestamp for the signature.
+  const nonce = require("crypto").randomBytes(16).toString("hex");
+  const timestamp = Date.now();
+  const token = jwt.sign(
+      {
+        nonce: nonce,
+        timestamp: timestamp,
+        productIdentifier: productIdentifier,
+        offerIdentifier: offerIdentifier,
+      },
+      applePrivateKey,
+      {
+        algorithm: "ES256",
+        keyid: appleKeyId,
+        issuer: appleIssuerId,
+      },
+  );
+
+  return {
+    signature: token,
+    nonce: nonce,
+    timestamp: timestamp,
+    keyId: appleKeyId,
+  };
+});
+
+/**
  * Sends a monthly report summarizing AI usage and user statistics.
  * This function is scheduled to run at 9:00 AM on the 1st day of every month.
  */
-exports.monthlyReport = functions.pubsub.schedule("0 9 1 * *")
-    .timeZone("America/New_York") // Set to your preferred timezone
-    .onRun(async (context) => {
+exports.monthlyReport = onSchedule("0 9 1 * *", async (event) => {
       const nodemailer = require("nodemailer");
       console.log("Generating monthly report...");
 
@@ -369,16 +656,16 @@ exports.monthlyReport = functions.pubsub.schedule("0 9 1 * *")
         to: ADMIN_EMAIL,
         subject: `Student Suite Monthly Report for ${monthYear}`,
         html: `<h1>Student Suite Report: ${monthYear}</h1>
-               <p><b>Total Users:</b> ${totalUsers}</p>
-               <p><b>Active AI Users:</b> ${activeUsers}</p>
-               <hr>
-               <p><b>Total AI Requests:</b> ${totalRequests.toLocaleString()}</p>
-               <p><b>Total AI Cost:</b> $${totalCost.toFixed(4)}</p>
-               <p><b>Total Input Tokens:</b> ${totalInputTokens.toLocaleString()}</p>
-               <p><b>Total Output Tokens:</b> ${totalOutputTokens.toLocaleString()}</p>
-               <hr>
-               <p><b>Average Requests per Active User:</b> ${avgRequests}</p>
-               <p><b>Average Cost per Active User:</b> $${avgCost}</p>`,
+                      <p><b>Total Users:</b> ${totalUsers}</p>
+                      <p><b>Active AI Users:</b> ${activeUsers}</p>
+                      <hr>
+                      <p><b>Total AI Requests:</b> ${totalRequests.toLocaleString()}</p>
+                      <p><b>Total AI Cost:</b> ${totalCost.toFixed(4)}</p>
+                      <p><b>Total Input Tokens:</b> ${totalInputTokens.toLocaleString()}</p>
+                      <p><b>Total Output Tokens:</b> ${totalOutputTokens.toLocaleString()}</p>
+                      <hr>
+                      <p><b>Average Requests per Active User:</b> ${avgRequests}</p>
+                      <p><b>Average Cost per Active User:</b> ${avgCost}</p>`,
       };
 
       try {
@@ -394,21 +681,22 @@ exports.monthlyReport = functions.pubsub.schedule("0 9 1 * *")
  * It implements a failover mechanism, trying multiple API keys.
  * Expects `data.prompt` to be provided.
  */
-async function handleGeneration(data, context) {
+async function handleGeneration(request) {
+  const {data} = request;
   // Ensure app is initialized. This is a safeguard against cold start issues
   // where the global scope might not be fully available.
   if (admin.apps.length === 0) {
     admin.initializeApp();
   }
 
-  if (!context.auth) {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
         "unauthenticated",
         "The function must be called while authenticated.",
     );
   }
 
-  const userId = context.auth.uid;
+  const userId = request.auth.uid;
 
   // --- 1. Check Usage Limit ---
   const now = new Date();
@@ -540,21 +828,20 @@ async function handleGeneration(data, context) {
 }
 
 // Create specific endpoints for each AI feature for clarity and maintainability.
-exports.generateStudyNote = functions.https.onCall(handleGeneration);
-exports.generateFlashcards = functions.https.onCall(handleGeneration);
-exports.generateResume = functions.https.onCall(handleGeneration);
-exports.generateCoverLetter = functions.https.onCall(handleGeneration);
-exports.getTeacherResponse = functions.https.onCall(handleGeneration);
-exports.getInterviewerResponse = functions.https.onCall(handleGeneration);
-exports.getInterviewFeedback = functions.https.onCall(handleGeneration);
+exports.generateStudyNote = onCall(handleGeneration);
+exports.generateFlashcards = onCall(handleGeneration);
+exports.generateResume = onCall(handleGeneration);
+exports.generateCoverLetter = onCall(handleGeneration);
+exports.getTeacherResponse = onCall(handleGeneration);
+exports.getInterviewerResponse = onCall(handleGeneration);
+exports.getInterviewFeedback = onCall(handleGeneration);
 
 /**
  * Sets the 'isFounder' flag for the first 1000 users upon creation.
  * This is triggered whenever a new document is created in the /users collection.
  */
-exports.onUserCreate = functions.firestore
-    .document("users/{userId}")
-    .onCreate(async (snap, context) => {
+exports.onUserCreate = onDocumentCreated("users/{userId}", async (event) => {
+      const snap = event.data;
       const db = admin.firestore();
       const metadataRef = db.collection("globals").doc("metadata");
 
@@ -574,7 +861,7 @@ exports.onUserCreate = functions.firestore
           // Increment the global user counter
           transaction.set(metadataRef, { userCount: userCount + 1 }, { merge: true });
         });
-        console.log(`User ${context.params.userId} processed. Founder status: ${userCount < 1000}`);
+        console.log(`User ${event.params.userId} processed. Founder status: ${userCount < 1000}`);
       } catch (e) {
         console.error("onUserCreate transaction failed: ", e);
       }

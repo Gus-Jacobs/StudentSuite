@@ -456,6 +456,7 @@ class AuthProvider extends ChangeNotifier {
 
       String? referredBy;
       if (referralCode != null && referralCode.isNotEmpty) {
+        // --- START TRY-CATCH FOR CLOUD FUNCTION CALL ---
         try {
           final HttpsCallable callable =
               FirebaseFunctions.instance.httpsCallable('validateReferralCode');
@@ -464,8 +465,23 @@ class AuthProvider extends ChangeNotifier {
           referredBy = result.data['referrerId'];
         } on FirebaseFunctionsException catch (e) {
           debugPrint(
+              'FirebaseFunctionsException caught in signUp (validateReferralCode):');
+          debugPrint('  Code: ${e.code}');
+          debugPrint('  Message: ${e.message}');
+          debugPrint('  Details: ${e.details}');
+          debugPrint(
               "Referral code check failed: ${e.code} - ${e.message}. Proceeding without referral.");
+          // Do not rethrow here, as the original logic allowed proceeding without referral.
+        } catch (e, stacktrace) {
+          debugPrint(
+              'General Exception caught in signUp (validateReferralCode):');
+          debugPrint('  Error: $e');
+          debugPrint('  StackTrace: $stacktrace');
+          debugPrint(
+              "Referral code check failed due to unexpected error. Proceeding without referral.");
+          // Do not rethrow here.
         }
+        // --- END TRY-CATCH FOR CLOUD FUNCTION CALL ---
       }
 
       await FirebaseFirestore.instance.collection('users').doc(user!.uid).set({

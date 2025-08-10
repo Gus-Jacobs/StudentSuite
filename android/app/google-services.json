@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:749555197585:android:d99914d409057c66218130",
+        "mobilesdk_app_id": "1:749555197585:android:24e1c9b6ea0666bb218130",
         "android_client_info": {
-          "package_name": "com.example.student_suite"
+          "package_name": "com.pegumax.studentsuite"
         }
       },
       "oauth_client": [],

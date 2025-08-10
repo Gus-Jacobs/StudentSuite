@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 
 /// A custom exception for the AI service to provide user-friendly error messages.
 class AiServiceException implements Exception {
@@ -23,30 +24,57 @@ class AiService {
   // Singleton pattern
   static final AiService _instance = AiService._internal();
   factory AiService() => _instance;
-  AiService._internal() {
-    // You can configure functions to use the emulator here if needed
-    // For example:
-    // if (kDebugMode) {
-    //   FirebaseFunctions.instance.useFunctionsEmulator('localhost', 5001);
-    // }
-  }
+  AiService._internal();
+
+  // The base URL for all your Cloud Functions
+  static const _functionsBaseUrl =
+      'https://us-central1-student-suite-9ae1d.cloudfunctions.net';
 
   // --- Core Generation Logic ---
 
-  /// Central generation function that calls a specified Cloud Function.
-  Future<String> _callCloudFunction(String functionName, String prompt) async {
+  /// A helper method to get the authenticated user's ID token.
+  Future<String?> _getIdToken() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      return await user.getIdToken();
+    }
+    return null;
+  }
+
+  /// Central generation function that calls a specified Cloud Function via HTTP.
+  Future<dynamic> _callCloudFunction(
+      String functionName, Map<String, dynamic> data) async {
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable(functionName);
-      final result =
-          await callable.call<Map<String, dynamic>>({'prompt': prompt});
-      // Cost tracking would now happen in the Cloud Function, not here.
-      return result.data['text'] as String;
-    } on FirebaseFunctionsException catch (e) {
-      // The message from the Cloud Function (e.g., usage limit exceeded) is already user-friendly.
-      throw AiServiceException(e.message ?? 'An unknown AI error occurred.');
-    } catch (e) {
-      // ignore: avoid_print
-      print("An unexpected error occurred calling the cloud function: $e");
+      final url = '$_functionsBaseUrl/$functionName';
+      final idToken = await _getIdToken();
+
+      if (idToken == null) {
+        throw AiServiceException('User not authenticated.');
+      }
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode(data),
+      );
+
+      if (response.statusCode != 200) {
+        final errorData = jsonDecode(response.body);
+        final errorMessage =
+            errorData['error']?['message'] ?? 'An unknown AI error occurred.';
+        debugPrint('Cloud Function Error ($functionName): $errorMessage');
+        throw AiServiceException(errorMessage);
+      }
+
+      final responseData = jsonDecode(response.body);
+      return responseData['text'] ?? responseData;
+    } on Exception catch (e, stacktrace) {
+      debugPrint(
+          "An unexpected error occurred calling the cloud function '$functionName': $e");
+      debugPrint("StackTrace: $stacktrace");
       throw AiServiceException(
           "An unexpected error occurred. Please try again later.");
     }
@@ -62,10 +90,25 @@ class AiService {
     required List<String> skills,
     required String templateStyle,
   }) async {
-    final prompt = _buildResumePrompt(contactInfo, experiences, education,
-        certificates, skills, templateStyle);
-    final generatedText = await _callCloudFunction('generateResume', prompt);
-    return _parseResumeOutput(generatedText, education, certificates);
+    try {
+      final prompt = _buildResumePrompt(contactInfo, experiences, education,
+          certificates, skills, templateStyle);
+      final data = {
+        'prompt': prompt,
+        'contactInfo': contactInfo,
+        'experiences': experiences,
+        'education': education,
+        'certificates': certificates,
+        'skills': skills,
+        'templateStyle': templateStyle,
+      };
+      final generatedText =
+          await _callCloudFunction('generateResume', data) as String;
+      return _parseResumeOutput(generatedText, education, certificates);
+    } catch (e) {
+      debugPrint('Error in generateResume: $e');
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> generateCoverLetter({
@@ -75,16 +118,35 @@ class AiService {
     required String jobDescription,
     required String templateStyle,
   }) async {
-    final prompt = _buildCoverLetterPrompt(
-        userName, companyName, hiringManager, jobDescription, templateStyle);
-    final generatedText =
-        await _callCloudFunction('generateCoverLetter', prompt);
-    return _parseCoverLetterOutput(generatedText);
+    try {
+      final prompt = _buildCoverLetterPrompt(
+          userName, companyName, hiringManager, jobDescription, templateStyle);
+      final data = {
+        'prompt': prompt,
+        'userName': userName,
+        'companyName': companyName,
+        'hiringManager': hiringManager,
+        'jobDescription': jobDescription,
+        'templateStyle': templateStyle,
+      };
+      final generatedText =
+          await _callCloudFunction('generateCoverLetter', data) as String;
+      return _parseCoverLetterOutput(generatedText);
+    } catch (e) {
+      debugPrint('Error in generateCoverLetter: $e');
+      rethrow;
+    }
   }
 
   Future<String> generateStudyNote({required String topic}) async {
-    final prompt = _buildStudyNotePrompt(topic);
-    return await _callCloudFunction('generateStudyNote', prompt);
+    try {
+      final prompt = _buildStudyNotePrompt(topic);
+      final data = {'prompt': prompt, 'topic': topic};
+      return await _callCloudFunction('generateStudyNote', data) as String;
+    } catch (e) {
+      debugPrint('Error in generateStudyNote: $e');
+      rethrow;
+    }
   }
 
   Future<List<Map<String, String>>> generateFlashcards({
@@ -92,34 +154,53 @@ class AiService {
     int count = 10,
     String? subjectContext,
   }) async {
-    final prompt = _buildFlashcardPrompt(topic, count, subjectContext);
-    final generatedText =
-        await _callCloudFunction('generateFlashcards', prompt);
-    return _parseFlashcardOutput(generatedText);
+    try {
+      final prompt = _buildFlashcardPrompt(topic, count, subjectContext);
+      final data = {
+        'topic': topic,
+        'count': count,
+        'subjectContext': subjectContext,
+        'prompt': prompt,
+      };
+      final generatedText =
+          await _callCloudFunction('generateFlashcards', data) as String;
+      return _parseFlashcardOutput(generatedText);
+    } catch (e) {
+      debugPrint('Error in generateFlashcards: $e');
+      rethrow;
+    }
   }
 
   Future<String> getTeacherResponse({
     required List<ChatMessage> history,
   }) async {
-    const systemMessage =
-        'You are an expert AI Teacher. Your goal is to explain complex topics clearly and concisely. Be encouraging and ask clarifying questions. If your explanation is long, end it with "[CONTINUE]" to signal that you have more to say.';
+    try {
+      const systemMessage =
+          'You are an expert AI Teacher. Your goal is to explain complex topics clearly and concisely. Be encouraging and ask clarifying questions. If your explanation is long, end it with "[CONTINUE]" to signal that you have more to say.';
 
-    var historyForApi = List<ChatMessage>.from(history);
+      var historyForApi = List<ChatMessage>.from(history);
 
-    // If it's the first message, prepend the system message to the user's first query.
-    // For subsequent messages, the system message is implicitly part of the ongoing conversation
-    // and handled by the model's understanding of the roles.
-    if (historyForApi.length == 1) {
-      final firstUserMessage = historyForApi.first;
-      historyForApi[0] = ChatMessage(
-          role: 'user',
-          content:
-              '$systemMessage\n\nMy first question is: ${firstUserMessage.content}');
+      if (historyForApi.length == 1) {
+        final firstUserMessage = historyForApi.first;
+        historyForApi[0] = ChatMessage(
+            role: 'user',
+            content:
+                '$systemMessage\n\nMy first question is: ${firstUserMessage.content}');
+      }
+
+      final prompt =
+          historyForApi.map((m) => '${m.role}: ${m.content}').join('\n');
+      final data = {
+        'prompt': prompt,
+        'history': historyForApi
+            .map((m) => {'role': m.role, 'content': m.content})
+            .toList()
+      };
+      return await _callCloudFunction('getTeacherResponse', data) as String;
+    } catch (e) {
+      debugPrint('Error in getTeacherResponse: $e');
+      rethrow;
     }
-
-    final prompt =
-        historyForApi.map((m) => '${m.role}: ${m.content}').join('\n');
-    return await _callCloudFunction('getTeacherResponse', prompt);
   }
 
   Future<String> getInterviewerResponse({
@@ -127,31 +208,40 @@ class AiService {
     required String jobDescription,
     String? resumeText,
   }) async {
-    const systemMessage =
-        'You are a professional AI Interviewer. Your role is to conduct a realistic mock interview.\n'
-        '- Ask one behavioral or technical question at a time, based on the provided job description and resume.\n'
-        '- **Do NOT provide any feedback, commentary, or follow-up analysis on the user\'s answers.** Your only response should be the next question.\n'
-        '- Keep the interview flowing naturally.\n'
-        '- After asking 5-7 questions, conclude the interview by responding with only the text "[END_INTERVIEW]".';
-    final context =
-        'Job Description: $jobDescription\n\nResume: ${resumeText ?? 'Not provided.'}';
+    try {
+      const systemMessage =
+          'You are a professional AI Interviewer. Your role is to conduct a realistic mock interview.\n'
+          '- Ask one behavioral or technical question at a time, based on the provided job description and resume.\n'
+          '- **Do NOT provide any feedback, commentary, or follow-up analysis on the user\'s answers.** Your only response should be the next question.\n'
+          '- Keep the interview flowing naturally.\n'
+          '- After asking 5-7 questions, conclude the interview by responding with only the text "[END_INTERVIEW]".';
+      final context =
+          'Job Description: $jobDescription\n\nResume: ${resumeText ?? 'Not provided.'}';
 
-    var historyForApi = List<ChatMessage>.from(history);
+      var historyForApi = List<ChatMessage>.from(history);
 
-    // If history is empty, it's the start of the interview, so prime with system message and context.
-    if (historyForApi.isEmpty) {
-      historyForApi.add(ChatMessage(
-          role: 'user',
-          content:
-              '$systemMessage\n\nHere is the context for our interview:\n$context\n\nPlease ask your first question.'));
+      if (historyForApi.isEmpty) {
+        historyForApi.add(ChatMessage(
+            role: 'user',
+            content:
+                '$systemMessage\n\nHere is the context for our interview:\n$context\n\nPlease ask your first question.'));
+      }
+
+      final prompt =
+          historyForApi.map((m) => '${m.role}: ${m.content}').join('\n');
+      final data = {
+        'prompt': prompt,
+        'history': historyForApi
+            .map((m) => {'role': m.role, 'content': m.content})
+            .toList(),
+        'jobDescription': jobDescription,
+        'resumeText': resumeText,
+      };
+      return await _callCloudFunction('getInterviewerResponse', data) as String;
+    } catch (e) {
+      debugPrint('Error in getInterviewerResponse: $e');
+      rethrow;
     }
-    // If history is not empty, it means the conversation is ongoing.
-    // The system message and context are already part of the initial prompt's "memory"
-    // and handled by the conversation history, so we just pass the ongoing messages.
-
-    final prompt =
-        historyForApi.map((m) => '${m.role}: ${m.content}').join('\n');
-    return await _callCloudFunction('getInterviewerResponse', prompt);
   }
 
   Future<String> getInterviewFeedback({
@@ -159,18 +249,30 @@ class AiService {
     required String jobDescription,
     String? resumeText,
   }) async {
-    const systemMessage =
-        'You are a helpful career coach. The user has just completed a mock interview. Your task is to provide constructive feedback on their answers based on the interview history and the job description. Format the feedback in Markdown with clear headings for "Overall Impression", "Strengths", and "Areas for Improvement".';
-    final context =
-        'Job Description: $jobDescription\n\nResume: ${resumeText ?? 'Not provided.'}';
-    final transcript = history
-        .map((m) =>
-            '${m.role == 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}')
-        .join('\n');
+    try {
+      const systemMessage =
+          'You are a helpful career coach. The user has just completed a mock interview. Your task is to provide constructive feedback on their answers based on the interview history and the job description. Format the feedback in Markdown with clear headings for "Overall Impression", "Strengths", and "Areas for Improvement".';
+      final context =
+          'Job Description: $jobDescription\n\nResume: ${resumeText ?? 'Not provided.'}';
+      final transcript = history
+          .map((m) =>
+              '${m.role == 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}')
+          .join('\n');
 
-    final prompt =
-        '$systemMessage\n\nHere is the context for the interview:\n$context\n\nHere is the full interview transcript:\n$transcript\n\nPlease provide your feedback now.';
-    return await _callCloudFunction('getInterviewFeedback', prompt);
+      final prompt =
+          '$systemMessage\n\nHere is the context for the interview:\n$context\n\nHere is the full interview transcript:\n$transcript\n\nPlease provide your feedback now.';
+      final data = {
+        'prompt': prompt,
+        'history':
+            history.map((m) => {'role': m.role, 'content': m.content}).toList(),
+        'jobDescription': jobDescription,
+        'resumeText': resumeText,
+      };
+      return await _callCloudFunction('getInterviewFeedback', data) as String;
+    } catch (e) {
+      debugPrint('Error in getInterviewFeedback: $e');
+      rethrow;
+    }
   }
 
   // --- PROMPT & PARSING HELPERS ---
@@ -297,9 +399,7 @@ ${skills.join(', ')}
         'formatted_certificates': certificates,
       };
     } catch (e) {
-      // ignore: avoid_print
-      print("Error parsing resume output: $e");
-      // Return a map with an error message to be displayed in the UI.
+      debugPrint("Error parsing resume output: $e");
       return {
         'professional_summary':
             "Error: Could not parse the AI's response. The raw response was:\n\n$text",
@@ -311,7 +411,6 @@ ${skills.join(', ')}
     }
   }
 
-  /// Constructs the prompt for the cover letter generation task.
   String _buildCoverLetterPrompt(String userName, String companyName,
       String hiringManager, String jobDescription, String templateStyle) {
     return """You are an AI assistant that writes professional, concise, and compelling cover letters.
@@ -354,7 +453,6 @@ Sincerely,
 """;
   }
 
-  /// Parses the AI's structured text response for a cover letter into a map.
   Map<String, dynamic> _parseCoverLetterOutput(String text) {
     try {
       return {
@@ -365,8 +463,7 @@ Sincerely,
         'closing': _extractSection(text, 'CLOSING'),
       };
     } catch (e) {
-      // ignore: avoid_print
-      print("Error parsing cover letter output: $e");
+      debugPrint("Error parsing cover letter output: $e");
       return {
         'salutation': 'Dear Hiring Team,',
         'opening_paragraph': 'Error: Could not parse AI response.',
@@ -377,7 +474,6 @@ Sincerely,
     }
   }
 
-  /// Constructs the prompt for the study note generation task.
   String _buildStudyNotePrompt(String topic) {
     return """You are an AI assistant that creates very short and simple study notes. For the given topic, provide a concise definition and a simple way to remember it (like a mnemonic or an analogy).
 
@@ -393,7 +489,6 @@ Topic: "$topic"
 """;
   }
 
-  /// Constructs the prompt for the flashcard generation task.
   String _buildFlashcardPrompt(
       String topic, int count, String? subjectContext) {
     String contextInstruction = '';
@@ -422,7 +517,6 @@ Answer 2
 """;
   }
 
-  /// Parses the AI's structured text response for flashcards into a list of maps.
   List<Map<String, String>> _parseFlashcardOutput(String text) {
     try {
       final cards = <Map<String, String>>[];
@@ -438,8 +532,7 @@ Answer 2
       }
       return cards;
     } catch (e) {
-      // ignore: avoid_print
-      print("Error parsing flashcard output: $e");
+      debugPrint("Error parsing flashcard output: $e");
       return [
         {'question': 'Error', 'answer': 'Could not parse AI response.'}
       ];
@@ -448,7 +541,6 @@ Answer 2
 
   // --- PARSING HELPER METHODS ---
 
-  /// Extracts a section of text between [TAG] and [/TAG].
   String _extractSection(String text, String tag) {
     try {
       final startTag = '[$tag]';
@@ -463,7 +555,6 @@ Answer 2
     }
   }
 
-  /// Extracts the value from a line that starts with a given key (e.g., "Company: ").
   String _extractLine(String text, String key) {
     try {
       final lines = text.split('\n');
