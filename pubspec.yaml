@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+2
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -37,10 +37,10 @@ dependencies:
   # FIREBASE & AUTH
   firebase_core: ^4.0.0
   firebase_auth: ^6.0.0
-  firebase_storage: ^13.0.0
+  firebase_storage: ^13.0.0 # For storing profile pictures
   google_sign_in: ^7.1.1
+  cloud_functions: ^6.0.0 # For callable functions
   cloud_firestore: ^6.0.0
-  cloud_functions: ^6.0.0
 
   # STATE MANAGEMENT
   provider: ^6.1.2
@@ -62,7 +62,7 @@ dependencies:
   flutter_colorpicker: ^1.1.0
   image_picker: ^1.1.2
   http: ^1.2.1 # For Canvas API requests
-  flutter_web_auth_2: ^4.1.0 # For Canvas OAuth
+  flutter_web_auth_2: ^3.1.2 # For Canvas OAuth
   flip_card: ^0.7.0 # For flashcards
   confetti: ^0.7.0 # For celebratory animations
   flutter_markdown: ^0.7.7+1 # For rendering AI responses
@@ -77,16 +77,9 @@ dependencies:
   flutter_staggered_grid_view: ^0.7.0 # For skills layout,
   url_launcher: ^6.3.1 # For opening Stripe links,
   dio: ^5.2.0 # For advanced HTTP requests,
-  flutter_launcher_icons: "^0.13.1"
-  change_app_package_name: ^1.1.0
-
-
 dependency_overrides:
   intl: ^0.19.0
 
-flutter_launcher_icons:
-  android: "launcher_icon"
-  image_path: "assets/img/icon.png"
 
 dev_dependencies:
   flutter_test:
@@ -113,6 +106,7 @@ flutter:
     - assets/img/
     - assets/img/frames/
     - assets/fonts/
+    - assets/models/
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

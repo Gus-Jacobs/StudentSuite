@@ -137,7 +137,6 @@ class MyApp extends StatelessWidget {
               // This Consumer is for showing the global loading overlay based on AuthProvider's state.
               return MaterialApp(
                 title: 'Student Suite',
-                debugShowCheckedModeBanner: false, // Add this line
                 theme: themeProvider.lightThemeData,
                 darkTheme: themeProvider.darkThemeData,
                 themeMode: themeProvider.themeMode,

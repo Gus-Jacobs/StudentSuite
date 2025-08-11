@@ -306,15 +306,21 @@ async function updateUserRole(stripeCustomerId, status) {
   const userDoc = usersQuery.docs[0];
   const userId = userDoc.id;
   const stripeRole = status === "active" ? "pro" : "free";
+  const stripeRole = status === "active" ? "pro" : "free";
 
   try {
     // Update Firestore document
+    await userDoc.ref.update({stripeRole: stripeRole});
     await userDoc.ref.update({stripeRole: stripeRole});
 
     // Update Firebase Auth custom claims based on combined status
     const isPro = stripeRole === "pro" || userDoc.data()?.iapRole === "pro";
     await admin.auth().setCustomUserClaims(userId, {isPro: isPro});
+    // Update Firebase Auth custom claims based on combined status
+    const isPro = stripeRole === "pro" || userDoc.data()?.iapRole === "pro";
+    await admin.auth().setCustomUserClaims(userId, {isPro: isPro});
 
+    console.log(`Successfully set Stripe role to '${stripeRole}' for user ${userId}`);
     console.log(`Successfully set Stripe role to '${stripeRole}' for user ${userId}`);
     return userDoc; // Return the document for further processing
   } catch (error) {
@@ -408,9 +414,31 @@ exports.onUserDeleted = auth.user().onDelete(async (user) => {
   const firestore = admin.firestore();
   const storage = admin.storage().bucket();
   const stripe = require("stripe")(functions.config().stripe.secret);
+  const stripe = require("stripe")(functions.config().stripe.secret);
 
   // 1. Attempt to cancel Stripe subscription before deleting data
+  // 1. Attempt to cancel Stripe subscription before deleting data
   const userDocRef = firestore.collection("users").doc(userId);
+  try {
+    const userDoc = await userDocRef.get();
+    const customerId = userDoc.data()?.stripeCustomerId;
+    const stripeSubscriptionId = userDoc.data()?.stripeSubscriptionId;
+
+    if (customerId && stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(stripeSubscriptionId);
+        console.log(`Successfully cancelled Stripe subscription for user: ${userId}`);
+      } catch (error) {
+        console.error(`Error cancelling Stripe subscription for deleted user ${userId}:`, error);
+        // Do not throw an error here; continue with cleanup
+      }
+    }
+  } catch (error) {
+    console.error(`Error retrieving user data for subscription cancellation of ${userId}:`, error);
+  }
+
+  // 2. Recursively delete the user's document and all subcollections
+  // (e.g., checkout_sessions, portal_links, aiUsage) from Firestore.
   try {
     const userDoc = await userDocRef.get();
     const customerId = userDoc.data()?.stripeCustomerId;
@@ -438,6 +466,7 @@ exports.onUserDeleted = auth.user().onDelete(async (user) => {
     console.error(`Error deleting Firestore data for user ${userId}:`, error);
   }
 
+  // 3. Delete the user's profile picture from Firebase Storage.
   // 3. Delete the user's profile picture from Firebase Storage.
   const profilePicRef = storage.file(`profile_pics/${userId}`);
   try {

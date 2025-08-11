@@ -61,9 +61,11 @@ class DefaultFirebaseOptions {
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDu-I7ym-Y0IFlRaOb-F-h7JxC1otoQ_2k',
     appId: '1:749555197585:ios:5c8ebdf94e079402218130',
+    appId: '1:749555197585:ios:5c8ebdf94e079402218130',
     messagingSenderId: '749555197585',
     projectId: 'student-suite-9ae1d',
     storageBucket: 'student-suite-9ae1d.firebasestorage.app',
+    iosBundleId: 'com.pegumax.studentsuite',
     iosBundleId: 'com.pegumax.studentsuite',
   );
 
@@ -85,5 +87,4 @@ class DefaultFirebaseOptions {
     storageBucket: 'student-suite-9ae1d.firebasestorage.app',
     measurementId: 'G-4MV2W5QWLE',
   );
-
 }
